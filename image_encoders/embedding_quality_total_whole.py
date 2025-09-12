@@ -5,8 +5,12 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 import numpy as np
 
+# Experiment settings
+encoder = "uni"
+dataset = "hest1k"
+
 # Paths
-embeddings_path = Path("/home/nadun/hdd/CLAM/data/conch_features/pt_files")
+embeddings_path = Path(f"/home/nadun/hdd/CLAM/data/{encoder}_features/pt_files")
 hest_path = Path("/home/nadun/hdd/HEST/hest_data/metadata")
 
 all_embeddings = []
@@ -68,6 +72,6 @@ plt.legend(title="Disease State")
 plt.tight_layout()
 
 # Save plot
-output_file = "results/tsne_all_wsi_whole.png"
+output_file = f"results/{encoder}_{dataset}/tsne_all_wsi_whole.png"
 plt.savefig(output_file, dpi=300, bbox_inches="tight")
 print(f"t-SNE plot saved to {output_file}")
