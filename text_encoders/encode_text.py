@@ -95,4 +95,4 @@ plt.tight_layout()
 # Save plot
 output_file = "results/tsne_text_prompts.png"
 plt.savefig(output_file, dpi=300, bbox_inches="tight")
-print(f"✅ t-SNE plot saved to {output_file}")
+print(f"t-SNE plot saved to {output_file}")
