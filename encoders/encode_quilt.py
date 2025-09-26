@@ -41,6 +41,7 @@ def conch_encode_text(texts, model_cfg='conch_ViT-B-16'):
     print(f"text embeddings: text_embs.shape", text_embs.shape)
 
     return text_embs
+    
 
 class HistopathTextImageDataset(Dataset):
     def __init__(self, csv_path, images_dir, transform=None):
@@ -59,9 +60,30 @@ class HistopathTextImageDataset(Dataset):
         caption = row["caption"]
         img_full_path = self.images_dir / img_rel_path
         img_embedding = conch_encode_img(img_full_path, image_only=False).detach()
-        text_embeds = conch_encode_text([caption]).detach()
+        caption_embeds = conch_encode_text([caption]).detach()
 
-        return img_embedding, text_embeds
+        roi = row.get("roi_text", None)
+        if pd.notna(roi) and isinstance(roi, str):
+            roi_embeds = conch_encode_text([roi]).detach()
+        else:
+            roi_embeds = None
+
+        pathology = row.get("pathology_text", None)
+        if pd.notna(pathology) and isinstance(pathology, str):
+            pathology_embeds = conch_encode_text([pathology]).detach()
+        else:
+            pathology_embeds = None
+
+        return img_embedding, caption_embeds, roi_embeds, pathology_embeds
+
+def calculate_similarity(image_embeddings, text_embeddings):
+    # Normalize the embeddings
+    image_embeddings = image_embeddings / image_embeddings.norm(dim=1, keepdim=True)
+    text_embeddings = text_embeddings / text_embeddings.norm(dim=1, keepdim=True)
+
+    # Calculate cosine similarity
+    similarity = torch.matmul(image_embeddings, text_embeddings.t())
+    return similarity
 
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
@@ -80,6 +102,7 @@ dataset = HistopathTextImageDataset(csv_path=csv_path, images_dir=img_path)
 #     return imgs, list(captions)
 
 def safe_collate(batch):
+    #Have to stack manually the added rois and pathology texts
     imgs, texts = zip(*batch)
     # imgs is tuple of tensors (each [1,512] or [C, H, W] etc.)
     imgs = torch.stack(imgs, dim=0)  # simple stacking
@@ -95,16 +118,27 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 count = 0
 n = 10
 
-for imgs, captions in dataloader:
+for imgs, captions, roi, pathology in dataloader:
 
     if count == n: break
     print("Iteration", count)
 
-    imgs = imgs.to(device)
     # captions is a list of strings
     print("Batch imgs:", imgs.shape)
-    print("Captions:", captions[:3])
     print("Caption length", captions.shape)
+
+    #calculate similarity
+    caption_similarity = calculate_similarity(imgs.squeeze(1), captions.squeeze(1))
+    print("Caption similarity shape", caption_similarity.shape)
+
+    if roi is not None:
+        roi_similarity = calculate_similarity(imgs.squeeze(1), roi.squeeze(1))
+        print("ROI similarity shape", roi_similarity.shape)
+
+    if pathology is not None:
+        pathology_similarity = calculate_similarity(imgs.squeeze(1), pathology.squeeze(1))
+        print("Pathology similarity shape", pathology_similarity.shape)
+
     # Here you would tokenize captions and pass them through the text encoder
     # tokenized = tokenizer(captions, ...)
     # text_embeds = text_encoder(**tokenized)
