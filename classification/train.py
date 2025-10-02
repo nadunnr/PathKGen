@@ -106,11 +106,11 @@ for epoch in range(1, EPOCHS + 1):
 # ----------------------------
 # Save model and losses
 # ----------------------------
-torch.save(model.state_dict(), "classifier_model.pt")
-np.save("train_losses.npy", np.array(train_losses))
-np.save("val_losses.npy", np.array(val_losses))
-np.save("train_accuracies.npy", np.array(train_accuracies))
-np.save("val_accuracies.npy", np.array(val_accuracies))
+torch.save(model.state_dict(), "results/classifier_model.pt")
+np.save("results/train_losses.npy", np.array(train_losses))
+np.save("results/val_losses.npy", np.array(val_losses))
+np.save("results/train_accuracies.npy", np.array(train_accuracies))
+np.save("results/val_accuracies.npy", np.array(val_accuracies))
 
 print("Model and metrics saved.")
 
@@ -163,5 +163,5 @@ plt.legend()
 plt.grid(True)
 
 plt.tight_layout()
-plt.savefig("training_curves.png", dpi=150)
+plt.savefig("results/training_curves.png", dpi=150)
 plt.show()
