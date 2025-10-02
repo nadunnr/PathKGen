@@ -1,7 +1,10 @@
 /data
 /checkpoints
+/classification/results
 /image_encoders/results
 /text_encoders/results
+/encoders/results
+/encoders/results_copy
 /text_encoders/hest_metadata_prompts.jsonl
 *__pycache__/
 *.pyc
