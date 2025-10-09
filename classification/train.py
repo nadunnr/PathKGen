@@ -4,9 +4,14 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
+import time
+import os
 
 from dataset import SlideEmbeddingDataset
 from model import BaseClassifier
+
+datetime = time.strftime("%m-%d-%H-%M", time.localtime())
+print(f"Training started at {datetime}")
 
 # Hyper-parameters
 BATCH_SIZE = 8
@@ -106,11 +111,13 @@ for epoch in range(1, EPOCHS + 1):
 # ----------------------------
 # Save model and losses
 # ----------------------------
-torch.save(model.state_dict(), "results/classifier_model.pt")
-np.save("results/train_losses.npy", np.array(train_losses))
-np.save("results/val_losses.npy", np.array(val_losses))
-np.save("results/train_accuracies.npy", np.array(train_accuracies))
-np.save("results/val_accuracies.npy", np.array(val_accuracies))
+
+os.makedirs(f"results/{datetime}", exist_ok=True)
+torch.save(model.state_dict(), f"results/{datetime}/classifier_model.pt")
+np.save(f"results/{datetime}/train_losses.npy", np.array(train_losses))
+np.save(f"results/{datetime}/val_losses.npy", np.array(val_losses))
+np.save(f"results/{datetime}/train_accuracies.npy", np.array(train_accuracies))
+np.save(f"results/{datetime}/val_accuracies.npy", np.array(val_accuracies))
 
 print("Model and metrics saved.")
 
@@ -163,5 +170,5 @@ plt.legend()
 plt.grid(True)
 
 plt.tight_layout()
-plt.savefig("results/training_curves.png", dpi=150)
+plt.savefig(f"results/{datetime}/training_curves.png", dpi=150)
 plt.show()
