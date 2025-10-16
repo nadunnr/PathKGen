@@ -36,15 +36,18 @@ def conch_encode_text(checkpoint_path, texts, device, model_cfg='conch_ViT-B-16'
     return text_embs
 
 def preprocess_text(text):
+    # This creates a 1 dim for each sentence
     if isinstance(text, list) or isinstance(text, tuple):
         return text
     elif isinstance(text, str):
-        return [s.strip() for s in text.split(".")]
+        return [text]
     
 def main():
+    torch.cuda.empty_cache()
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    #device = "cpu"
 
     with open(INPUT_JSONL, "r") as f:
         lines = f.readlines()
