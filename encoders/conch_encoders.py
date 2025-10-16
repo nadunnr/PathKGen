@@ -50,8 +50,7 @@ def conch_encode_text(checkpoint_path, texts, model_cfg='conch_ViT-B-16'):
     ### Embed texts
     #The **.encode_text()** method encodes a batch of texts into a batch of l2-normalized text embeddings used for computing the similarity scores such as between images and texts. 
 
-    texts = ["H&E image of lung adenocarcinoma",
-             "photomicrograph of a lung squamous cell carcinoma, H&E stain"]
+    texts = ["H&E image of lung adenocarcinoma. photomicrograph of a lung squamous cell carcinoma, H&E stain"]
     tokenizer = get_tokenizer() # load tokenizer
     text_tokens = tokenize(texts=texts, tokenizer=tokenizer) # tokenize the text
     text_embs = model.encode_text(text_tokens)
@@ -61,4 +60,4 @@ def conch_encode_text(checkpoint_path, texts, model_cfg='conch_ViT-B-16'):
     return text_embs
 
 #conch_encode_img(checkpoint_path, image_path='../data/roi1.jpg', image_only=False, model_cfg=model_cfg)
-#conch_encode_text(checkpoint_path, texts=None, model_cfg=model_cfg)
+conch_encode_text(checkpoint_path, texts=None, model_cfg=model_cfg)
