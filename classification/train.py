@@ -6,9 +6,15 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import time
 import os
-
+from sklearn.metrics import precision_score, recall_score, f1_score
 from dataset import SlideEmbeddingDataset
 from model import BaseClassifier
+
+def precision_recall_f1(y_true, y_pred, average='macro'):
+    precision = precision_score(y_true, y_pred, average=average)
+    recall = recall_score(y_true, y_pred, average=average)
+    f1 = f1_score(y_true, y_pred, average=average)
+    return precision, recall, f1
 
 datetime = time.strftime("%m-%d-%H-%M", time.localtime())
 print(f"Training started at {datetime}")
@@ -125,7 +131,9 @@ print("Model and metrics saved.")
 # Final evaluation
 # ----------------------------
 model.eval()
+all_preds, all_labels = [], []
 correct, total = 0, 0
+
 with torch.no_grad():
     for features, labels in val_loader:
         features = features.to(device)
@@ -136,11 +144,30 @@ with torch.no_grad():
 
         outputs = model(features)
         _, preds = torch.max(outputs, 1)
+
+        all_preds.extend(preds.cpu().numpy())
+        all_labels.extend(labels.cpu().numpy())
+
         correct += (preds == labels).sum().item()
         total += labels.size(0)
 
 final_acc = correct / total
-print(f"Final Validation Accuracy: {final_acc:.4f}")
+precision, recall, f1 = precision_recall_f1(all_labels, all_preds, average='macro')
+
+print("\n=== Final Validation Results ===")
+print(f"Accuracy:  {final_acc:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall:    {recall:.4f}")
+print(f"F1 Score:  {f1:.4f}")
+
+# Save metrics to file
+results_path = f"results/{datetime}/results.txt"
+with open(results_path, "w") as f:
+    f.write("======= Results =======\n")
+    f.write(f"Accuracy:  {final_acc:.4f}\n")
+    f.write(f"Precision: {precision:.4f}\n")
+    f.write(f"Recall:    {recall:.4f}\n")
+    f.write(f"F1 Score:  {f1:.4f}\n")
 
 # ----------------------------
 # Plot losses and accuracies

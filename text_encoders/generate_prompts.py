@@ -6,16 +6,25 @@ import ollama
 from pathlib import Path
 
 
-def get_response(f):  
+def get_response(f):
     response = ollama.chat(
         'deepseek-r1:8b',
-        messages=[{'role': 'user', "content": f"""Here is the histopathology slide of: H&E-stained section of the {f['tissue']} from a {f['species']} in a {f['disease_state']} state (noted as {f['disease_comment']}). Provide a clinical report based on this disease highlighting properties of histopathology slides with this condition as a paragraph of text.
-        """}],
+        messages=[{
+            'role': 'user',
+            'content': f"""
+                You are a clinical pathologist. Describe the microscopic features observed in an H&E-stained histopathology slide of the {f['tissue']} from a {f['species']} in a {f['disease_state']} condition ({f['disease_comment']}).
+
+                Write a single, well-structured paragraph summarizing key histopathological characteristics typical for this condition. 
+                Use objective and formal language — as found in a pathology report — without any prefaces, introductions, or conversational phrases.
+                Do not start with words like “Okay”, “Here is”, “This is”, or similar.
+                Only provide the descriptive report text.
+            """
+        }],
     )
+
     msg = response['message']['content']
     clean_text = re.sub(r"<think>.*?</think>", "", msg, flags=re.DOTALL).strip()
     return clean_text
-
 
 # -------- Load IDs from saved text file --------
 ids_file = Path("/home/nadun/hdd/literature-guided-digital-histopathology/text_encoders/file_names.txt")
