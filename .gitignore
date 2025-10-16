@@ -11,3 +11,4 @@
 *.png
 *.jsonl
 *.h5
+results/

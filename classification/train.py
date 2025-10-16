@@ -29,8 +29,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # 1. Load dataset
-data_path = Path("/home/nadun/wd/TRIDENT/trident_processed/40x_512px_0px_overlap/slide_features_titan")
-dataset = SlideEmbeddingDataset(data_path)
+#vision_data_path = Path("/home/nadun/wd/TRIDENT/trident_processed/20x_256px_0px_overlap/slide_features_madeleine")
+vision_data_path = Path("/home/nadun/wd/TRIDENT/trident_processed/40x_256px_0px_overlap/slide_features_madeleine")
+text_data_path = Path("/home/nadun/hdd/literature-guided-digital-histopathology/text_encoders/text_descriptions_embeds")
+dataset = SlideEmbeddingDataset(vision_data_path, text_data_path, vision_only=False)
 
 # train/val split
 train_size = int(0.8 * len(dataset))
@@ -44,7 +46,7 @@ val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 print(f"Dataset loaded with Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
 
 # 2. Linear classifier 
-model = BaseClassifier(input_dim=768, num_classes=len(CLASS_NAMES)).to(device)
+model = BaseClassifier(input_dim=1024, num_classes=len(CLASS_NAMES)).to(device)
 print("Model loaded")
 
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
@@ -162,12 +164,30 @@ print(f"F1 Score:  {f1:.4f}")
 
 # Save metrics to file
 results_path = f"results/{datetime}/results.txt"
+
+total_params = sum(p.numel() for p in model.parameters())
+trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 with open(results_path, "w") as f:
+    f.write("======= Experiment Info =======\n")
+    f.write(f"Run timestamp: {datetime}\n")
+    f.write(f"Vision only:   {dataset.vision_only}\n")
+    f.write(f"Num classes:   {len(CLASS_NAMES)}\n")
+    f.write(f"Model params:  {total_params:,} total ({trainable_params:,} trainable)\n")
+    f.write(f"Device:        {device}\n\n")
+
+    f.write("======= Data Paths =======\n")
+    f.write(f"Visual data:    {vision_data_path}\n")
+    f.write(f"Text data:      {text_data_path}\n")
+    f.write(f"Metadata:       {dataset.metadata_dir}\n\n")
+
     f.write("======= Results =======\n")
     f.write(f"Accuracy:  {final_acc:.4f}\n")
     f.write(f"Precision: {precision:.4f}\n")
     f.write(f"Recall:    {recall:.4f}\n")
     f.write(f"F1 Score:  {f1:.4f}\n")
+
+print(f"Results written to {results_path}")
 
 # ----------------------------
 # Plot losses and accuracies
