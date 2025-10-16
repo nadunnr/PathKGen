@@ -8,3 +8,5 @@
 /text_encoders/hest_metadata_prompts.jsonl
 *__pycache__/
 *.pyc
+*.png
+*.jsonl
