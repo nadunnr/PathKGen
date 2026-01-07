@@ -12,3 +12,5 @@
 *.jsonl
 *.h5
 results/
+histogpt_pipeline/
+get_weights.py

@@ -134,7 +134,7 @@ if __name__ == "__main__":
     parser.add_argument("--patch_size", type=int, default=512,
                        help="Patch size used in embeddings (default: 512)")
     args = parser.parse_args()
-    
+    print(args.encoder_name)
     plot_tsne(
         embedding_base_path=Path(args.embedding_path),
         encoder_name=args.encoder_name,

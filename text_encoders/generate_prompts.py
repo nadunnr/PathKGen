@@ -4,7 +4,7 @@ import pandas as pd
 import re
 import ollama
 from pathlib import Path
-
+import glob
 
 def get_response(f):
     response = ollama.chat(
@@ -26,21 +26,19 @@ def get_response(f):
     clean_text = re.sub(r"<think>.*?</think>", "", msg, flags=re.DOTALL).strip()
     return clean_text
 
-# -------- Load IDs from saved text file --------
-ids_file = Path("/home/nadun/hdd/literature-guided-digital-histopathology/text_encoders/file_names.txt")
 
-with open(ids_file, "r", encoding="utf-8") as f:
-    ids_to_query = [line.strip() for line in f if line.strip()]
+ids_to_query = glob.glob("/home/nadun/wd/HEST/hest_data_20/wsis/*tif")
+ids_to_query = [os.path.basename(id).replace(".tif", "") for id in ids_to_query]
 
-print(f"Loaded {len(ids_to_query)} IDs from {ids_file}")
+print(f"Loaded {len(ids_to_query)} IDs from")
 
 # -------- Run inference --------
 outputs = []
-outfile = 'hest_responses.jsonl'
+outfile = 'hest_responses_20.jsonl'
 
 for idx, slide_id in enumerate(ids_to_query):
     print(f"Processing {idx+1}/{len(ids_to_query)}: {slide_id}")
-    meta_path = f"/home/nadun/wd/HEST/hest_data_40/metadata/{slide_id}.json"
+    meta_path = f"/home/nadun/wd/HEST/hest_data_20/metadata/{slide_id}.json"
     if not os.path.exists(meta_path):
         print(f"⚠️ Metadata not found for {slide_id}, skipping...")
         continue

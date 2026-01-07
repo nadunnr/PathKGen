@@ -11,8 +11,8 @@ model_cfg = 'conch_ViT-B-16'
 checkpoint_path = "/home/nadun/hdd/literature-guided-digital-histopathology/checkpoints/conch/pytorch_model.bin"
 
 # === CONFIG ===
-INPUT_JSONL = "./text_encoders/hest_responses.jsonl"        
-OUTPUT_DIR = "./text_encoders/text_descriptions_embeds"            
+INPUT_JSONL = "./text_encoders/hest_responses_20.jsonl"        
+OUTPUT_DIR = "./text_encoders/text_embeds_20"            
 # ===============
 
 def conch_encode_text(checkpoint_path, texts, device, model_cfg='conch_ViT-B-16'):

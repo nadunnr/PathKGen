@@ -219,3 +219,6 @@ plt.grid(True)
 plt.tight_layout()
 plt.savefig(f"results/{datetime}/training_curves.png", dpi=150)
 plt.show()
+
+
+#getting the cosing similarity between text and image embeddings
