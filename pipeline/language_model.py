@@ -1,54 +1,72 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# Configuration
-model_id = "Qwen/Qwen2.5-7B-Instruct"
+# 1. Local Paths (Verified for your current setup)
+# This points to the 15GB of base weights you just downloaded
+base_model_path = "/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
+# This points to your specific SlideChat training checkpoint
 checkpoint_path = "/home/nadun/wd/vlm_histo/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt" 
 
-print("Loading base Qwen 2.5-7B and tokenizer...")
-tokenizer = AutoTokenizer.from_pretrained(model_id)
+print(f"Loading base Qwen model from: {base_model_path}")
 
-#Load in bfloat16 to match the SlideChat training precision
+# 2. Load Tokenizer and Base Model
+# By pointing to the local folder, it skips all downloads    
+tokenizer = AutoTokenizer.from_pretrained(base_model_path)
 model = AutoModelForCausalLM.from_pretrained(
-    model_id,
-    torch_dtype=torch.bfloat16,
-    device_map="auto"
+    base_model_path,
+    torch_dtype=torch.bfloat16, # Optimized for RTX 3090
+    device_map="auto"           # Automatically uses your GPU
 )
 
-# Load the SlideChat .pt weights
-print(f"Loading weights from {checkpoint_path}...")
-# map_location="cpu" is safer during the loading phase
-state_dict = torch.load(checkpoint_path, map_location="cpu")
+# 3. Load and Clean SlideChat Weights
+print(f"Injecting SlideChat weights from: {checkpoint_path}")
 
-# Filter and Clean Keys
-# XTuner/DeepSpeed saves weights with prefixes like 'model.' or 'module.'
-# Standard Hugging Face models do not have these.
+# Using weights_only=True follows the new PyTorch security recommendation
+state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+
 new_state_dict = {}
 for key, value in state_dict.items():
-    # Remove 'model.' prefix and skip the multimodal-only parts for now
-    if key.startswith("model.") and "mm_projector" not in key and "slide_encoder" not in key:
+    # SlideChat/XTuner saves weights with 'model.' prefix
+    if key.startswith("model."):
         clean_key = key.replace("model.", "")
-        new_state_dict[clean_key] = value
+        
+        # We skip the vision-specific keys because this script is for the LLM part only
+        if "mm_projector" not in clean_key and "slide_encoder" not in clean_key:
+            new_state_dict[clean_key] = value
 
 # 4. Inject Weights into the LLM
-# strict=False is MANDATORY because we are skipping the projector/encoder keys
+# strict=False is required as we are intentionally skipping vision layers
 msg = model.load_state_dict(new_state_dict, strict=False)
-print(f"Weight loading complete. Missing keys: {len(msg.missing_keys)}")
-# Note: missing_keys should mostly be 'visual_encoder' or 'projector' related.
 
-# 5. Simple Text Inference Check
-print("\n--- Testing Model Output ---")
+print("-" * 30)
+print(f"Successfully loaded SlideChat weights.")
+print(f"Missing keys (Expected vision layers): {len(msg.missing_keys)}")
+print(f"Unexpected keys: {len(msg.unexpected_keys)}")
+print("-" * 30)
+
+# 5. Inference Test
 prompt = "Describe the role of a pathologist in cancer diagnosis."
 messages = [
-    {"role": "system", "content": "You are a helpful medical assistant."},
+    {"role": "system", "content": "You are a helpful medical assistant specialized in histopathology."},
     {"role": "user", "content": prompt}
 ]
+
 text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
+print("\nGenerating Clinical Analysis...")
 generated_ids = model.generate(
     **model_inputs,
-    max_new_tokens=100
+    max_new_tokens=300,
+    do_sample=True,
+    temperature=0.3, # Lower temperature for more factual, less "creative" results
+    top_p=0.9,
+    repetition_penalty=1.1 # Helps prevent looping or generic list-making
 )
+
 response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-print(f"\nResponse:\n{response.split('assistant')[-1].strip()}")
+
+# Output the result directly
+print("-" * 30)
+print(f"Model Analysis:\n{response}")
+print("-" * 30)
