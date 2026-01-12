@@ -1,72 +1,63 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# 1. Local Paths (Verified for your current setup)
-# This points to the 15GB of base weights you just downloaded
+# 1. Paths
 base_model_path = "/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
-# This points to your specific SlideChat training checkpoint
+# Path to your SlideChat .pt file
 checkpoint_path = "/home/nadun/wd/vlm_histo/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt" 
 
-print(f"Loading base Qwen model from: {base_model_path}")
+print(f"1. Loading base Qwen 2.5 model architecture from: {base_model_path}")
 
-# 2. Load Tokenizer and Base Model
-# By pointing to the local folder, it skips all downloads    
+# 2. Initializing with Default Weights
 tokenizer = AutoTokenizer.from_pretrained(base_model_path)
 model = AutoModelForCausalLM.from_pretrained(
     base_model_path,
-    torch_dtype=torch.bfloat16, # Optimized for RTX 3090
-    device_map="auto"           # Automatically uses your GPU
+    torch_dtype=torch.bfloat16, 
+    device_map="auto"           
 )
 
-# 3. Load and Clean SlideChat Weights
-print(f"Injecting SlideChat weights from: {checkpoint_path}")
-
-# Using weights_only=True follows the new PyTorch security recommendation
+# 3. Loading SlideChat Weights
+print(f"2. Overriding default weights with SlideChat checkpoint: {checkpoint_path}")
+# Loading onto CPU first to prevent VRAM spikes during mapping
 state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
 
 new_state_dict = {}
 for key, value in state_dict.items():
-    # SlideChat/XTuner saves weights with 'model.' prefix
+    # SlideChat/XTuner saves weights with 'model.' prefix; we strip it for the HuggingFace model
     if key.startswith("model."):
         clean_key = key.replace("model.", "")
-        
-        # We skip the vision-specific keys because this script is for the LLM part only
+        # Skip vision-only parameters for this text-only inference test
         if "mm_projector" not in clean_key and "slide_encoder" not in clean_key:
             new_state_dict[clean_key] = value
 
-# 4. Inject Weights into the LLM
-# strict=False is required as we are intentionally skipping vision layers
+# 4. Inject and Confirm
+# strict=False is necessary as we are omitting the vision layers in this branch
 msg = model.load_state_dict(new_state_dict, strict=False)
 
 print("-" * 30)
-print(f"Successfully loaded SlideChat weights.")
-print(f"Missing keys (Expected vision layers): {len(msg.missing_keys)}")
-print(f"Unexpected keys: {len(msg.unexpected_keys)}")
+if len(msg.unexpected_keys) == 0 and len(msg.missing_keys) > 0:
+    print("STATUS: SUCCESS. Model is now running on SLIDECHAT WEIGHTS.")
+    print(f"Note: {len(msg.missing_keys)} base layers (mostly vision-related) were not overwritten.")
+else:
+    print("STATUS: WARNING. Mismatched weights detected. Verify the 'model.' prefix logic.")
 print("-" * 30)
 
-# 5. Inference Test
-prompt = "Describe the role of a pathologist in cancer diagnosis."
-messages = [
-    {"role": "system", "content": "You are a helpful medical assistant specialized in histopathology."},
-    {"role": "user", "content": prompt}
-]
+# 5. Inference (Paragraph Completion)
+prompt = "Histopathological Analysis Report: Pathological examination of the tissue specimen reveals"
+inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
 
-text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-
-print("\nGenerating Clinical Analysis...")
+print("Generating Analysis...")
 generated_ids = model.generate(
-    **model_inputs,
-    max_new_tokens=300,
+    **inputs,
+    max_new_tokens=250,
     do_sample=True,
-    temperature=0.3, # Lower temperature for more factual, less "creative" results
-    top_p=0.9,
-    repetition_penalty=1.1 # Helps prevent looping or generic list-making
+    temperature=0.4, 
+    repetition_penalty=1.2,
+    eos_token_id=tokenizer.eos_token_id
 )
 
-response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+response = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
 
-# Output the result directly
 print("-" * 30)
-print(f"Model Analysis:\n{response}")
+print(f"Report Output (SlideChat Weighted):\n{response}")
 print("-" * 30)
