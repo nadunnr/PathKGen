@@ -15,3 +15,5 @@ results/
 histogpt_pipeline/
 get_weights.py
 RAG-Anytihng
+data_pre-processing/dataset_cleaned_with_organs.json
+quickstart.sh

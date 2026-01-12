@@ -1,3 +1,6 @@
+"""In TCGA There can be mpp (microns per pxel) which is inversely related to magnification missing from metadata.
+THis script create csv file for the slide encoder to know the WSI's mpp, if absent assign default val."""
+
 import os
 import openslide
 import pandas as pd
