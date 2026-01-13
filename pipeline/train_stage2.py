@@ -69,6 +69,8 @@ def parse_args():
                        help="Maximum sequence length")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4,
                        help="Gradient accumulation steps (increase for smaller batch size)")
+    parser.add_argument("--gradient_checkpointing", action="store_true",
+                       help="Enable gradient checkpointing to save memory")
     parser.add_argument("--num_workers", type=int, default=4,
                        help="DataLoader workers")
     
@@ -213,7 +215,7 @@ def main():
     
     val_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
-        split='val',
+        split='test',
         feature_key=args.feature_key
     )
     
@@ -257,6 +259,7 @@ def main():
         num_visual_tokens=args.num_visual_tokens,
         use_qlora=True,    # Stage 2: Use QLoRA
         freeze_llm=False,  # Stage 2: Train LLM with LoRA
+        gradient_checkpointing=args.gradient_checkpointing,
         device=device
     )
     
