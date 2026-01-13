@@ -63,6 +63,7 @@ class VisionLanguageModel(nn.Module):
         num_visual_tokens: int = 32,
         use_qlora: bool = False,
         freeze_llm: bool = True,
+        gradient_checkpointing: bool = False,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
         super().__init__()
@@ -103,13 +104,18 @@ class VisionLanguageModel(nn.Module):
             print(f"Loading SlideChat pathology weights from {slidechat_checkpoint}")
             self._load_slidechat_weights(slidechat_checkpoint)
         
-        # 5. Freeze LLM if specified
+        # 5. Enable gradient checkpointing if requested (saves ~40% activation memory)
+        if gradient_checkpointing:
+            print("Enabling gradient checkpointing for memory efficiency...")
+            self.llm.gradient_checkpointing_enable()
+        
+        # 6. Freeze LLM if specified
         if freeze_llm and not use_qlora:
             print("Freezing LLM parameters...")
             for param in self.llm.parameters():
                 param.requires_grad = False
                 
-        # 6. Move projection to device and match LLM dtype
+        # 7. Move projection to device and match LLM dtype
         self.projection = self.projection.to(device)
         # Convert projection to bfloat16 to match LLM
         self.projection = self.projection.to(torch.bfloat16)
@@ -121,6 +127,7 @@ class VisionLanguageModel(nn.Module):
         print(f"  - Projection: {visual_dim} → {num_visual_tokens} tokens × {llm_hidden_dim}")
         print(f"  - LLM frozen: {freeze_llm}")
         print(f"  - Using QLoRA: {use_qlora}")
+        print(f"  - Gradient checkpointing: {gradient_checkpointing}")
         
     def _load_llm_with_qlora(self, llm_path: str) -> nn.Module:
         """Load LLM with 4-bit quantization and LoRA adapters."""
@@ -343,7 +350,7 @@ class VisionLanguageModel(nn.Module):
             'epoch': epoch,
             'projection_state_dict': self.projection.state_dict(),
             'model_config': {
-                'visual_dim': self.projection.mlp[0].in_features,
+                'visual_dim': self.projection.projector[0].in_features,
                 'num_visual_tokens': self.projection.num_visual_tokens,
                 'use_qlora': self.use_qlora
             }

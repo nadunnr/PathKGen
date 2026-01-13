@@ -31,6 +31,14 @@ class WSI_Report_Dataset(Dataset):
         else:
             raise ValueError("split must be a string or a list/tuple/set of strings.")
         
+        # Filter out samples without feature_path (some val samples may not have features extracted)
+        original_len = len(self.dataset)
+        self.dataset = [item for item in self.dataset if 'feature_path' in item]
+        filtered_len = len(self.dataset)
+        
+        if filtered_len < original_len:
+            print(f"Warning: Filtered out {original_len - filtered_len} samples without feature_path")
+        
     def __len__(self):
         return len(self.dataset)
 
