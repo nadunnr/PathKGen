@@ -50,9 +50,9 @@ def parse_args():
     # Training arguments
     parser.add_argument("--epochs", type=int, default=10,
                        help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=8,
-                       help="Training batch size")
-    parser.add_argument("--val_batch_size", type=int, default=16,
+    parser.add_argument("--batch_size", type=int, default=4,
+                       help="Training batch size (reduced for memory)")
+    parser.add_argument("--val_batch_size", type=int, default=8,
                        help="Validation batch size")
     parser.add_argument("--lr", type=float, default=1e-4,
                        help="Learning rate")
@@ -60,6 +60,8 @@ def parse_args():
                        help="Weight decay")
     parser.add_argument("--warmup_ratio", type=float, default=0.1,
                        help="Warmup ratio for scheduler")
+    parser.add_argument("--gradient_checkpointing", action="store_true",
+                       help="Enable gradient checkpointing to save memory")
     parser.add_argument("--max_length", type=int, default=512,
                        help="Maximum sequence length")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1,
@@ -124,7 +126,7 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device):
         loss = loss / args.gradient_accumulation_steps
         loss.backward()
         
-        # Optimizer step
+        # Optimizer step at the end of the gradient accumulation
         if (step + 1) % args.gradient_accumulation_steps == 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -202,7 +204,7 @@ def main():
     
     val_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
-        split='val',
+        split='test',
         feature_key=args.feature_key
     )
     
@@ -246,6 +248,7 @@ def main():
         num_visual_tokens=args.num_visual_tokens,
         use_qlora=False,  # Stage 1: No QLoRA
         freeze_llm=True,   # Stage 1: Freeze LLM
+        gradient_checkpointing=args.gradient_checkpointing,  # Memory optimization
         device=device
     )
     
