@@ -7,14 +7,14 @@ echo ""
 echo "Optimizations enabled:"
 echo "  - Gradient checkpointing: Saves ~40% activation memory"
 echo "  - Reduced batch size: 4 (from 8)"
-echo "  - Gradient accumulation: 2 steps (effective batch size = 8)"
+echo "  - Gradient accumulation: 4 steps (effective batch size = 16)"
 echo "  - Reduced max_length: 512 tokens (from 512)"
 echo ""
 
 python train_stage1.py \
     --epochs 10 \
     --batch_size 4 \
-    --gradient_accumulation_steps 2 \
+    --gradient_accumulation_steps 4\
     --max_length 512 \
     --gradient_checkpointing \
     --lr 1e-4 \

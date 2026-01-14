@@ -17,3 +17,8 @@ get_weights.py
 RAG-Anytihng
 data_pre-processing/dataset_cleaned_with_organs.json
 quickstart.sh
+*.pt
+*.pth
+*.json
+*.jsonl
+pipeline/debug_inference.sh
