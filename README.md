@@ -250,19 +250,3 @@ If missing, the model will fall back to base Qwen 2.5 weights.
 - [QLoRA](https://github.com/artidoro/qlora) - Efficient fine-tuning
 - [PEFT](https://github.com/huggingface/peft) - Parameter-Efficient Fine-Tuning
 
-## License
-
-This project builds upon SlideChat and Qwen 2.5. Please refer to their respective licenses.
-
-## Citation
-
-If you use this code, please cite:
-
-```bibtex
-@article{slidechat2024,
-  title={SlideChat: A Large Vision-Language Assistant for Whole-Slide Pathology Image Understanding},
-  author={...},
-  journal={CVPR},
-  year={2025}
-}
-```

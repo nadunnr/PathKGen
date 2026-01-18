@@ -75,7 +75,6 @@ if __name__ == "__main__":
     # --- Configuration ---
     json_file = "/home/nadun/wd/vlm_histo/data/curated_breast_dataset.json"
 
-
     try:
         split = ['train','val']
         dataset = WSI_Report_Dataset(json_file, split=split, feature_key='features')

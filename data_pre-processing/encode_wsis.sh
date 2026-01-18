@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Configuration
-WSI_DIR="/home/nadun/wd/datasets/tcga_wsis"
-JOB_DIR="/home/nadun/wd/datasets/trident_processed"
-CSV_PATH="/home/nadun/wd/datasets/tcga_wsis/slide_list.csv"
+WSI_DIR="/home/nadun/wd/datasets/tcga_report_histgen/breast_wsi_dataset"
+JOB_DIR="/home/nadun/wd/datasets/trident_processed/breast_wsi_dataset"
+CSV_PATH="/home/nadun/wd/datasets/tcga_report_histgen/breast_wsi_dataset/slide_list.csv"
 LOG_FILE="/home/nadun/wd/datasets/trident_processed/pipeline_status.log"
 
 # Initialize or clear previous log
