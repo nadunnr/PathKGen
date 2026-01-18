@@ -22,3 +22,8 @@ quickstart.sh
 *.json
 *.jsonl
 pipeline/debug_inference.sh
+*.jpg
+*.jpeg
+*.png
+*.tiff
+kg/docs/
