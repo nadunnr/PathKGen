@@ -344,6 +344,34 @@ class VisionLanguageModel(nn.Module):
         
         return generated_text
     
+    def merge_lora_weights(self):
+        """
+        Merge LoRA adapter weights into the base model.
+        
+        Converts a QLoRA model into a regular full-precision model by merging 
+        the low-rank adaptation weights back into the base weights.
+        After merging, the model can be saved/loaded without PEFT/QLoRA.
+        
+        Returns:
+            VisionLanguageModel: Self (for chaining)
+        """
+        if not self.use_qlora:
+            print("Model is not using QLoRA, nothing to merge")
+            return self
+        
+        print("Merging LoRA weights into base model...")
+        
+        # Merge and unload LoRA weights
+        self.llm = self.llm.merge_and_unload()
+        
+        # Update flag
+        self.use_qlora = False
+        
+        print("✓ LoRA weights merged successfully")
+        print("  Model is now a regular full-precision model")
+        
+        return self
+    
     def save_checkpoint(self, save_path: str, epoch: int, optimizer_state: Optional[dict] = None):
         """Save model checkpoint."""
         checkpoint = {
@@ -378,10 +406,15 @@ class VisionLanguageModel(nn.Module):
         
         # Load LLM/LoRA if present
         if 'lora_state_dict' in checkpoint and self.use_qlora:
-            self.llm.load_state_dict(checkpoint['lora_state_dict'])
+            # Use strict=False to handle quantization metadata keys
+            missing_keys, unexpected_keys = self.llm.load_state_dict(
+                checkpoint['lora_state_dict'], strict=False
+            )
             print(f"✓ Loaded LoRA weights")
+            if len(unexpected_keys) > 0:
+                print(f"  Note: {len(unexpected_keys)} unexpected keys (quantization metadata - this is normal)")
         elif 'llm_state_dict' in checkpoint and not self.freeze_llm:
-            self.llm.load_state_dict(checkpoint['llm_state_dict'])
+            self.llm.load_state_dict(checkpoint['llm_state_dict'], strict=False)
             print(f"✓ Loaded LLM weights")
         
         optimizer_state = checkpoint.get('optimizer_state_dict') if load_optimizer else None
