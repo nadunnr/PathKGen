@@ -92,7 +92,7 @@ if __name__ == "__main__":
     doc, linker = entity_linking(text)
     
     df_with_rels = linked_entities_with_relations(doc, linker, api_key=UMLS_API_KEY)   #API is faster
-    df_with_rels.to_csv("linked_entities.csv", index=False)
+    df_with_rels.to_csv("tmp/linked_entities.csv", index=False)
     print(f"Saved {len(df_with_rels)}")
 
    
