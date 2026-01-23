@@ -27,3 +27,6 @@ pipeline/debug_inference.sh
 *.png
 *.tiff
 kg/docs/
+kg/test.ipynb
+kg/tmp/
+pipeline/tmp/

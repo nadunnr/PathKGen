@@ -18,6 +18,7 @@ python run_batch_of_slides.py \
     --wsi_dir "$WSI_DIR" \
     --job_dir "$JOB_DIR" \
     --custom_list_of_wsis "$CSV_PATH" \
+    --max_workers 8 \
     --patch_encoder conch_v15 \
     --mag 20 \
     --patch_size 512 2>&1 | tee -a "$LOG_FILE"
@@ -39,6 +40,7 @@ python run_batch_of_slides.py \
     --wsi_dir "$WSI_DIR" \
     --job_dir "$JOB_DIR" \
     --custom_list_of_wsis "$CSV_PATH" \
+    --max_workers 4 \
     --slide_encoder titan \
     --mag 20 \
     --patch_size 512 2>&1 | tee -a "$LOG_FILE"

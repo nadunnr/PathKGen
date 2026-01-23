@@ -283,7 +283,7 @@ class VisionLanguageModel(nn.Module):
     def generate(
         self,
         visual_features: torch.Tensor,
-        prompt: str = "Generate a detailed pathology report for this slide:\n\n",
+        prompt: str = "Provide a concise single-paragraph pathology diagnosis:",
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.9,
@@ -460,7 +460,7 @@ if __name__ == "__main__":
     print("\n[Testing Generation]")
     report = model_stage1.generate(
         visual_features=dummy_visual[0],
-        prompt="Pathology report:",
+        prompt="Provide a concise single-paragraph pathology diagnosis:",
         max_new_tokens=50
     )
     print(f"Generated report: {report[:200]}...")
