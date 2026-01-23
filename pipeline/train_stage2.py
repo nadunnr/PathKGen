@@ -158,10 +158,12 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device):
 
 
 @torch.no_grad()
-def validate(model, dataloader, epoch, args, device):
-    """Validate the model."""
+def validate(model, dataloader, epoch, args, device, tokenizer=None):
+    """Validate the model with loss and generation metrics."""
     model.eval()
     total_loss = 0
+    all_predictions = []
+    all_references = []
     
     pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]")
     
@@ -178,11 +180,61 @@ def validate(model, dataloader, epoch, args, device):
             labels=labels
         )
         
-        total_loss += outputs['loss'].item()
-        pbar.set_postfix({'val_loss': f'{outputs["loss"].item():.4f}'})
+        batch_loss = outputs['loss'].item()
+        total_loss += batch_loss
+        
+        # Free memory before generation
+        del outputs
+        torch.cuda.empty_cache()
+        
+        # Generate predictions for metrics (one sample at a time)
+        if tokenizer is not None:
+            # Temporarily disable gradient checkpointing for generation
+            grad_checkpointing_enabled = model.llm.config.use_cache if hasattr(model.llm, 'config') else False
+            if hasattr(model.llm, 'gradient_checkpointing_enable'):
+                model.llm.gradient_checkpointing_disable()
+            
+            # Move batch to CPU to free GPU memory during generation
+            visual_features_cpu = visual_features.cpu()
+            labels_cpu = labels.cpu()
+            
+            for i in range(visual_features.shape[0]):
+                # Generate for single sample (move back to GPU one at a time)
+                single_visual = visual_features_cpu[i:i+1].to(device)
+                pred_text = model.generate(
+                    visual_features=single_visual,
+                    prompt="Generate a pathology report:\n\n",
+                    max_new_tokens=200,
+                    temperature=0.7,
+                    top_p=0.9
+                )
+                
+                # Store prediction (already decoded by model.generate())
+                all_predictions.append(pred_text)
+                
+                # Decode reference (on CPU)
+                label_ids = labels_cpu[i][labels_cpu[i] != -100]
+                ref_text = tokenizer.decode(label_ids, skip_special_tokens=True)
+                all_references.append(ref_text)
+                
+                # Clear cache after each generation
+                del single_visual
+                torch.cuda.empty_cache()
+            
+            # Re-enable gradient checkpointing if it was enabled
+            if hasattr(model.llm, 'gradient_checkpointing_enable') and grad_checkpointing_enabled:
+                model.llm.gradient_checkpointing_enable()
+        
+        pbar.set_postfix({'val_loss': f'{batch_loss:.4f}'})
     
     avg_loss = total_loss / len(dataloader)
-    return avg_loss
+    
+    metrics = {}
+    if len(all_predictions) > 0:
+        from metrics import compute_metrics
+        metrics = compute_metrics(all_predictions, all_references)
+    
+    return avg_loss, metrics
 
 
 def main():
@@ -321,7 +373,13 @@ def main():
     
     history = {
         'train_loss': [],
-        'val_loss': []
+        'val_loss': [],
+        'bleu1': [],
+        'bleu2': [],
+        'bleu3': [],
+        'bleu4': [],
+        'meteor': [],
+        'rouge_l': []
     }
     
     for epoch in range(start_epoch, args.epochs):
@@ -329,13 +387,20 @@ def main():
         train_loss = train_epoch(model, train_loader, optimizer, scheduler, epoch, args, device)
         history['train_loss'].append(train_loss)
         
-        # Validate
-        val_loss = validate(model, val_loader, epoch, args, device)
+        # Validate (with metrics)
+        val_loss, metrics = validate(model, val_loader, epoch, args, device, tokenizer)
         history['val_loss'].append(val_loss)
+        
+        # Store metrics
+        for key in ['bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor', 'rouge_l']:
+            history[key].append(metrics.get(key, 0.0))
         
         print(f"\nEpoch {epoch+1}/{args.epochs}:")
         print(f"  Train Loss: {train_loss:.4f}")
         print(f"  Val Loss: {val_loss:.4f}")
+        if metrics:
+            print(f"  BLEU-1: {metrics.get('bleu1', 0):.2f}  BLEU-2: {metrics.get('bleu2', 0):.2f}  BLEU-3: {metrics.get('bleu3', 0):.2f}  BLEU-4: {metrics.get('bleu4', 0):.2f}")
+            print(f"  METEOR: {metrics.get('meteor', 0):.2f}  ROUGE-L: {metrics.get('rouge_l', 0):.2f}")
         
         # Save checkpoint
         if (epoch + 1) % args.save_every == 0:

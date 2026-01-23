@@ -30,7 +30,7 @@ def parse_args():
     
     # Data arguments
     parser.add_argument("--data_json", type=str, 
-                       default="/home/nadun/wd/vlm_histo/data/curated_breast_dataset.json",
+                       default="/home/nadun/wd/datasets/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json",
                        help="Path to dataset JSON")
     parser.add_argument("--feature_key", type=str, default="features",
                        help="Key in H5 files for slide features")
@@ -52,8 +52,8 @@ def parse_args():
                        help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=4,
                        help="Training batch size (reduced for memory)")
-    parser.add_argument("--val_batch_size", type=int, default=8,
-                       help="Validation batch size")
+    parser.add_argument("--val_batch_size", type=int, default=2,
+                       help="Validation batch size (smaller to avoid OOM)")
     parser.add_argument("--lr", type=float, default=1e-4,
                        help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=0.01,
@@ -147,31 +147,91 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device):
 
 
 @torch.no_grad()
-def validate(model, dataloader, epoch, args, device):
-    """Validate the model."""
+def validate(model, dataloader, epoch, args, device, tokenizer=None):
+    """Validate the model with loss and generation metrics."""
     model.eval()
     total_loss = 0
+    num_samples = 0
+    all_predictions = []
+    all_references = []
     
     pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]")
     
     for batch in pbar:
-        visual_features = batch['visual_features'].to(device)
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
-        labels = batch['labels'].to(device)
+        # Process each sample individually to avoid OOM during loss computation
+        visual_features = batch['visual_features']
+        input_ids = batch['input_ids']
+        attention_mask = batch['attention_mask']
+        labels = batch['labels']
         
-        outputs = model(
-            visual_features=visual_features,
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            labels=labels
-        )
+        batch_size = visual_features.shape[0]
+        batch_loss_sum = 0
         
-        total_loss += outputs['loss'].item()
-        pbar.set_postfix({'val_loss': f'{outputs["loss"].item():.4f}'})
+        # Process samples one at a time
+        for i in range(batch_size):
+            # Move single sample to device
+            single_visual = visual_features[i:i+1].to(device)
+            single_input = input_ids[i:i+1].to(device)
+            single_mask = attention_mask[i:i+1].to(device)
+            single_labels = labels[i:i+1].to(device)
+            
+            # Forward pass for single sample
+            outputs = model(
+                visual_features=single_visual,
+                input_ids=single_input,
+                attention_mask=single_mask,
+                labels=single_labels
+            )
+            
+            sample_loss = outputs['loss'].item()
+            batch_loss_sum += sample_loss
+            
+            # Free memory immediately
+            del outputs, single_input, single_mask, single_labels
+            torch.cuda.empty_cache()
+            
+            # Generate prediction for metrics
+            if tokenizer is not None:
+                # Temporarily disable gradient checkpointing for generation
+                if hasattr(model.llm, 'gradient_checkpointing_disable'):
+                    model.llm.gradient_checkpointing_disable()
+                
+                pred_text = model.generate(
+                    visual_features=single_visual,
+                    prompt="Generate a pathology report:\n\n",
+                    max_new_tokens=200,
+                    temperature=0.7,
+                    top_p=0.9
+                )
+                all_predictions.append(pred_text)
+                
+                # Decode reference
+                label_ids = labels[i][labels[i] != -100]
+                ref_text = tokenizer.decode(label_ids, skip_special_tokens=True)
+                all_references.append(ref_text)
+                
+                # Re-enable gradient checkpointing if needed
+                if hasattr(model.llm, 'gradient_checkpointing_enable') and args.gradient_checkpointing:
+                    model.llm.gradient_checkpointing_enable()
+            
+            # Clear cache after each sample
+            del single_visual
+            torch.cuda.empty_cache()
+        
+        avg_batch_loss = batch_loss_sum / batch_size
+        total_loss += batch_loss_sum
+        num_samples += batch_size
+        
+        pbar.set_postfix({'val_loss': f'{avg_batch_loss:.4f}'})
     
-    avg_loss = total_loss / len(dataloader)
-    return avg_loss
+    avg_loss = total_loss / num_samples
+    
+    metrics = {}
+    if len(all_predictions) > 0:
+        from metrics import compute_metrics
+        metrics = compute_metrics(all_predictions, all_references)
+    
+    return avg_loss, metrics
 
 
 def main():
@@ -287,7 +347,13 @@ def main():
     
     history = {
         'train_loss': [],
-        'val_loss': []
+        'val_loss': [],
+        'bleu1': [],
+        'bleu2': [],
+        'bleu3': [],
+        'bleu4': [],
+        'meteor': [],
+        'rouge_l': []
     }
     
     for epoch in range(start_epoch, args.epochs):
@@ -295,13 +361,23 @@ def main():
         train_loss = train_epoch(model, train_loader, optimizer, scheduler, epoch, args, device)
         history['train_loss'].append(train_loss)
         
-        # Validate
-        val_loss = validate(model, val_loader, epoch, args, device)
+        # Clear cache before validation
+        torch.cuda.empty_cache()
+        
+        # Validate (with metrics)
+        val_loss, metrics = validate(model, val_loader, epoch, args, device, tokenizer)
         history['val_loss'].append(val_loss)
+        
+        # Store metrics
+        for key in ['bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor', 'rouge_l']:
+            history[key].append(metrics.get(key, 0.0))
         
         print(f"\nEpoch {epoch+1}/{args.epochs}:")
         print(f"  Train Loss: {train_loss:.4f}")
         print(f"  Val Loss: {val_loss:.4f}")
+        if metrics:
+            print(f"  BLEU-1: {metrics.get('bleu1', 0):.2f}  BLEU-2: {metrics.get('bleu2', 0):.2f}  BLEU-3: {metrics.get('bleu3', 0):.2f}  BLEU-4: {metrics.get('bleu4', 0):.2f}")
+            print(f"  METEOR: {metrics.get('meteor', 0):.2f}  ROUGE-L: {metrics.get('rouge_l', 0):.2f}")
         
         # Save checkpoint
         if (epoch + 1) % args.save_every == 0:

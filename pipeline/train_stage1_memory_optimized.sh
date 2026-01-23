@@ -12,7 +12,7 @@ echo "  - Reduced max_length: 512 tokens (from 512)"
 echo ""
 
 python train_stage1.py \
-    --epochs 10 \
+    --epochs 50 \
     --batch_size 4 \
     --gradient_accumulation_steps 4\
     --max_length 512 \
