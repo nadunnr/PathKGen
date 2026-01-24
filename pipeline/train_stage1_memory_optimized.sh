@@ -1,25 +1,43 @@
 #!/bin/bash
 # Memory-optimized training script for Stage 1
 
+epochs=12
+batch_size=2
+gradient_accumulation_steps=8
+max_length=512
+train_split=train,val
+val_split=test
+gradient_checkpointing=True
+lr=1e-4
+output_dir=checkpoints/stage1
+save_every=2
+
 echo "Starting Stage 1 Training with Memory Optimizations"
 echo "===================================================="
 echo ""
 echo "Optimizations enabled:"
-echo "  - Gradient checkpointing: Saves ~40% activation memory"
-echo "  - Reduced batch size: 4 (from 8)"
-echo "  - Gradient accumulation: 4 steps (effective batch size = 16)"
-echo "  - Reduced max_length: 512 tokens (from 512)"
+echo "  - Gradient checkpointing: $gradient_checkpointing"
+echo "  - Batch size: $batch_size"
+echo "  - Gradient accumulation: $gradient_accumulation_steps steps (effective batch size = $batch_size * $gradient_accumulation_steps)"
+echo "  - Max length: $max_length"
+echo "  - Train split: $train_split"
+echo "  - Val split: $val_split"
+echo "  - Learning rate: $lr"
+echo "  - Output directory: $output_dir"
+echo "  - Save every: $save_every epochs"
 echo ""
 
 python train_stage1.py \
-    --epochs 50 \
-    --batch_size 4 \
-    --gradient_accumulation_steps 4\
-    --max_length 512 \
+    --epochs $epochs \
+    --batch_size $batch_size \
+    --gradient_accumulation_steps $gradient_accumulation_steps\
+    --max_length $max_length \
+    --train_split $train_split \
+    --val_split $val_split \
     --gradient_checkpointing \
-    --lr 1e-4 \
-    --output_dir checkpoints/stage1 \
-    --save_every 2
+    --lr $lr \
+    --output_dir $output_dir \
+    --save_every $save_every
 
 echo ""
 echo "Training complete!"
