@@ -4,6 +4,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from typing import Optional, Dict, Tuple
 import warnings
+from config import (DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS, 
+                    DEFAULT_LLM_HIDDEN_DIM, DEFAULT_LLM_PATH, 
+                    DEFAULT_SLIDECHAT_CHECKPOINT)
 
 
 class ProjectionLayer(nn.Module):
@@ -16,7 +19,8 @@ class ProjectionLayer(nn.Module):
         - Expand to multiple learnable visual tokens
         - Output: [batch, num_visual_tokens, 3584]
     """
-    def __init__(self, visual_dim: int = 768, llm_hidden_dim: int = 3584, num_visual_tokens: int = 32, hidden_dim: int = 2048):
+    def __init__(self, visual_dim: int = DEFAULT_VISUAL_DIM, llm_hidden_dim: int = DEFAULT_LLM_HIDDEN_DIM, 
+                 num_visual_tokens: int = DEFAULT_NUM_VISUAL_TOKENS, hidden_dim: int = 2048):
         super().__init__()
         self.num_visual_tokens = num_visual_tokens
 
@@ -56,11 +60,11 @@ class VisionLanguageModel(nn.Module):
     """
     def __init__(
         self,
-        llm_path: str = "/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct",
-        slidechat_checkpoint: str = "/home/nadun/wd/vlm_histo/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt",
-        visual_dim: int = 768,
-        llm_hidden_dim: int = 3584,
-        num_visual_tokens: int = 32,
+        llm_path: str = DEFAULT_LLM_PATH,
+        slidechat_checkpoint: str = DEFAULT_SLIDECHAT_CHECKPOINT,
+        visual_dim: int = DEFAULT_VISUAL_DIM,
+        llm_hidden_dim: int = DEFAULT_LLM_HIDDEN_DIM,
+        num_visual_tokens: int = DEFAULT_NUM_VISUAL_TOKENS,
         use_qlora: bool = False,
         freeze_llm: bool = True,
         gradient_checkpointing: bool = False,
@@ -432,7 +436,7 @@ if __name__ == "__main__":
     print("\n[Stage 1 Test] Projection layer training")
     model_stage1 = VisionLanguageModel(
         visual_dim=768,
-        num_visual_tokens=32,
+        num_visual_tokens=64,
         use_qlora=False,
         freeze_llm=True
     )
