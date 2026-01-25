@@ -27,6 +27,11 @@ from pathlib import Path
 # Local imports
 from model import VisionLanguageModel
 from dataset import WSI_Report_Dataset
+from config import (GENERATION_PROMPT, DEFAULT_LLM_PATH, 
+                    DEFAULT_SLIDECHAT_CHECKPOINT, DEFAULT_VISUAL_DIM,
+                    DEFAULT_NUM_VISUAL_TOKENS, INFERENCE_MAX_NEW_TOKENS,
+                    DEFAULT_TEMPERATURE, DEFAULT_TOP_P, 
+                    DEFAULT_REPETITION_PENALTY)
 
 
 def parse_args():
@@ -36,14 +41,14 @@ def parse_args():
     parser.add_argument("--checkpoint", type=str, required=True,
                        help="Path to model checkpoint")
     parser.add_argument("--llm_path", type=str,
-                       default="/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct",
+                       default=DEFAULT_LLM_PATH,
                        help="Path to base LLM")
     parser.add_argument("--slidechat_checkpoint", type=str,
-                       default="/home/nadun/wd/vlm_histo/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt",
+                       default=DEFAULT_SLIDECHAT_CHECKPOINT,
                        help="Path to SlideChat weights")
-    parser.add_argument("--visual_dim", type=int, default=768,
+    parser.add_argument("--visual_dim", type=int, default=DEFAULT_VISUAL_DIM,
                        help="Dimension of slide features")
-    parser.add_argument("--num_visual_tokens", type=int, default=32,
+    parser.add_argument("--num_visual_tokens", type=int, default=DEFAULT_NUM_VISUAL_TOKENS,
                        help="Number of visual tokens")
     parser.add_argument("--use_qlora", action="store_true",
                        help="Whether checkpoint uses QLoRA (Stage 2)")
@@ -62,15 +67,15 @@ def parse_args():
     
     # Generation arguments
     parser.add_argument("--prompt", type=str,
-                       default="Generate a detailed pathology report for this whole slide image:\n\n",
+                       default=GENERATION_PROMPT,
                        help="Prompt template")
-    parser.add_argument("--max_new_tokens", type=int, default=512,
+    parser.add_argument("--max_new_tokens", type=int, default=INFERENCE_MAX_NEW_TOKENS,
                        help="Maximum tokens to generate")
-    parser.add_argument("--temperature", type=float, default=0.7,
+    parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE,
                        help="Sampling temperature")
-    parser.add_argument("--top_p", type=float, default=0.9,
+    parser.add_argument("--top_p", type=float, default=DEFAULT_TOP_P,
                        help="Nucleus sampling parameter")
-    parser.add_argument("--repetition_penalty", type=float, default=1.2,
+    parser.add_argument("--repetition_penalty", type=float, default=DEFAULT_REPETITION_PENALTY,
                        help="Repetition penalty")
     
     # Output arguments

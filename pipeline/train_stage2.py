@@ -14,6 +14,7 @@ Usage:
 import os
 import argparse
 import json
+from datetime import datetime
 from tqdm import tqdm
 import torch
 import torch.nn as nn
@@ -26,6 +27,11 @@ from transformers import AutoTokenizer
 from model import VisionLanguageModel
 from dataset import WSI_Report_Dataset
 from data_collator import VLMDataCollator
+from config import (GENERATION_PROMPT, TRAINING_PROMPT_TEMPLATE,
+                    DEFAULT_LLM_PATH, DEFAULT_SLIDECHAT_CHECKPOINT,
+                    DEFAULT_DATA_JSON, DEFAULT_STAGE2_OUTPUT,
+                    DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS,
+                    DEFAULT_MAX_LENGTH, DEFAULT_MAX_NEW_TOKENS)
 
 
 def parse_args():
@@ -33,23 +39,27 @@ def parse_args():
     
     # Data arguments
     parser.add_argument("--data_json", type=str, 
-                       default="/home/nadun/wd/vlm_histo/data/curated_breast_dataset.json",
+                       default=DEFAULT_DATA_JSON,
                        help="Path to dataset JSON")
+    parser.add_argument("--train_split", type=str, default="train",
+                       help="Split(s) to use for training. Can be single split 'train' or comma-separated 'train,val'")
+    parser.add_argument("--val_split", type=str, default="test",
+                       help="Split to use for validation. Single split name like 'test'")
     parser.add_argument("--feature_key", type=str, default="features",
                        help="Key in H5 files for slide features")
     
     # Model arguments
     parser.add_argument("--llm_path", type=str,
-                       default="/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct",
+                       default=DEFAULT_LLM_PATH,
                        help="Path to base LLM")
     parser.add_argument("--slidechat_checkpoint", type=str,
-                       default="/home/nadun/wd/vlm_histo/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt",
+                       default=DEFAULT_SLIDECHAT_CHECKPOINT,
                        help="Path to SlideChat weights")
     parser.add_argument("--stage1_checkpoint", type=str, required=True,
                        help="Path to Stage 1 checkpoint (for projection weights)")
-    parser.add_argument("--visual_dim", type=int, default=768,
+    parser.add_argument("--visual_dim", type=int, default=DEFAULT_VISUAL_DIM,
                        help="Dimension of slide features")
-    parser.add_argument("--num_visual_tokens", type=int, default=32,
+    parser.add_argument("--num_visual_tokens", type=int, default=DEFAULT_NUM_VISUAL_TOKENS,
                        help="Number of visual tokens")
     
     # Training arguments
@@ -65,7 +75,7 @@ def parse_args():
                        help="Learning rate for projection layer")
     parser.add_argument("--weight_decay", type=float, default=0.01,
                        help="Weight decay")
-    parser.add_argument("--max_length", type=int, default=512,
+    parser.add_argument("--max_length", type=int, default=DEFAULT_MAX_LENGTH,
                        help="Maximum sequence length")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4,
                        help="Gradient accumulation steps (increase for smaller batch size)")
@@ -82,7 +92,7 @@ def parse_args():
     
     # Checkpointing
     parser.add_argument("--output_dir", type=str, 
-                       default="/home/nadun/wd/vlm_histo/checkpoints/stage2",
+                       default=DEFAULT_STAGE2_OUTPUT,
                        help="Output directory for checkpoints")
     parser.add_argument("--save_every", type=int, default=1,
                        help="Save checkpoint every N epochs")
@@ -162,72 +172,89 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None):
     """Validate the model with loss and generation metrics."""
     model.eval()
     total_loss = 0
+    num_samples = 0
     all_predictions = []
     all_references = []
     
     pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]")
     
     for batch in pbar:
-        visual_features = batch['visual_features'].to(device)
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
-        labels = batch['labels'].to(device)
+        # Process each sample individually to avoid OOM during loss computation
+        visual_features = batch['visual_features']
+        input_ids = batch['input_ids']
+        attention_mask = batch['attention_mask']
+        labels = batch['labels']
         
-        outputs = model(
-            visual_features=visual_features,
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            labels=labels
-        )
+        batch_size = visual_features.shape[0]
+        batch_loss_sum = 0
         
-        batch_loss = outputs['loss'].item()
-        total_loss += batch_loss
-        
-        # Free memory before generation
-        del outputs
-        torch.cuda.empty_cache()
-        
-        # Generate predictions for metrics (one sample at a time)
-        if tokenizer is not None:
-            # Temporarily disable gradient checkpointing for generation
-            grad_checkpointing_enabled = model.llm.config.use_cache if hasattr(model.llm, 'config') else False
-            if hasattr(model.llm, 'gradient_checkpointing_enable'):
-                model.llm.gradient_checkpointing_disable()
+        # Process samples one at a time
+        for i in range(batch_size):
+            # Move single sample to device
+            single_visual = visual_features[i:i+1].to(device)
+            single_input = input_ids[i:i+1].to(device)
+            single_mask = attention_mask[i:i+1].to(device)
+            single_labels = labels[i:i+1].to(device)
             
-            # Move batch to CPU to free GPU memory during generation
-            visual_features_cpu = visual_features.cpu()
-            labels_cpu = labels.cpu()
+            # Forward pass for single sample
+            outputs = model(
+                visual_features=single_visual,
+                input_ids=single_input,
+                attention_mask=single_mask,
+                labels=single_labels
+            )
             
-            for i in range(visual_features.shape[0]):
-                # Generate for single sample (move back to GPU one at a time)
-                single_visual = visual_features_cpu[i:i+1].to(device)
+            sample_loss = outputs['loss'].item()
+            batch_loss_sum += sample_loss
+            
+            # Free memory immediately
+            del outputs, single_input, single_mask, single_labels
+            torch.cuda.empty_cache()
+            
+            # Generate prediction for metrics
+            if tokenizer is not None:
+                # Temporarily disable gradient checkpointing for generation
+                if hasattr(model.llm, 'gradient_checkpointing_disable'):
+                    model.llm.gradient_checkpointing_disable()
+                
                 pred_text = model.generate(
                     visual_features=single_visual,
-                    prompt="Generate a pathology report:\n\n",
-                    max_new_tokens=200,
+                    prompt=GENERATION_PROMPT,
+                    max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
                     temperature=0.7,
                     top_p=0.9
                 )
-                
-                # Store prediction (already decoded by model.generate())
                 all_predictions.append(pred_text)
                 
-                # Decode reference (on CPU)
-                label_ids = labels_cpu[i][labels_cpu[i] != -100]
-                ref_text = tokenizer.decode(label_ids, skip_special_tokens=True)
+                # Decode reference and remove prompt prefix
+                label_ids = labels[i][labels[i] != -100]
+                ref_text_full = tokenizer.decode(label_ids, skip_special_tokens=True)
+                
+                # Remove the training prompt from reference for fair comparison
+                # Extract just the prompt prefix from the template
+                prompt_prefix = TRAINING_PROMPT_TEMPLATE.replace("{report}", "")
+                if ref_text_full.startswith(prompt_prefix):
+                    ref_text = ref_text_full[len(prompt_prefix):].strip()
+                else:
+                    ref_text = ref_text_full.strip()
+                
                 all_references.append(ref_text)
                 
-                # Clear cache after each generation
-                del single_visual
-                torch.cuda.empty_cache()
+                # Re-enable gradient checkpointing if needed
+                if hasattr(model.llm, 'gradient_checkpointing_enable') and args.gradient_checkpointing:
+                    model.llm.gradient_checkpointing_enable()
             
-            # Re-enable gradient checkpointing if it was enabled
-            if hasattr(model.llm, 'gradient_checkpointing_enable') and grad_checkpointing_enabled:
-                model.llm.gradient_checkpointing_enable()
+            # Clear cache after each sample
+            del single_visual
+            torch.cuda.empty_cache()
         
-        pbar.set_postfix({'val_loss': f'{batch_loss:.4f}'})
+        avg_batch_loss = batch_loss_sum / batch_size
+        total_loss += batch_loss_sum
+        num_samples += batch_size
+        
+        pbar.set_postfix({'val_loss': f'{avg_batch_loss:.4f}'})
     
-    avg_loss = total_loss / len(dataloader)
+    avg_loss = total_loss / num_samples
     
     metrics = {}
     if len(all_predictions) > 0:
@@ -241,11 +268,18 @@ def main():
     args = parse_args()
     set_seed(args.seed)
     
-    # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
+    # Create timestamped experiment directory
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    exp_name = f"{timestamp}_vt{args.num_visual_tokens}_ml{args.max_length}_e{args.epochs}_bs{args.batch_size}"
+    exp_dir = os.path.join(args.output_dir, exp_name)
+    os.makedirs(exp_dir, exist_ok=True)
+    
+    print(f"\n{'='*60}")
+    print(f"Experiment directory: {exp_dir}")
+    print(f"{'='*60}")
     
     # Save args
-    with open(os.path.join(args.output_dir, 'train_args.json'), 'w') as f:
+    with open(os.path.join(exp_dir, 'train_args.json'), 'w') as f:
         json.dump(vars(args), f, indent=2)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -259,20 +293,24 @@ def main():
     
     # Initialize datasets
     print("Loading datasets...")
+    
+    # Parse train split (can be single or multiple)
+    train_split = args.train_split.split(',') if ',' in args.train_split else args.train_split
+    
     train_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
-        split='train',
+        split=train_split,
         feature_key=args.feature_key
     )
     
     val_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
-        split='test',
+        split=args.val_split,
         feature_key=args.feature_key
     )
     
-    print(f"Train samples: {len(train_dataset)}")
-    print(f"Val samples: {len(val_dataset)}")
+    print(f"Train samples: {len(train_dataset)} (split: {args.train_split})")
+    print(f"Val samples: {len(val_dataset)} (split: {args.val_split})")
     
     # Initialize collator
     collator = VLMDataCollator(
@@ -404,28 +442,28 @@ def main():
         
         # Save checkpoint
         if (epoch + 1) % args.save_every == 0:
-            save_path = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}.pt')
+            save_path = os.path.join(exp_dir, f'checkpoint_epoch_{epoch+1}.pt')
             model.save_checkpoint(save_path, epoch, optimizer.state_dict())
         
         # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_path = os.path.join(args.output_dir, 'best_model.pt')
+            best_path = os.path.join(exp_dir, 'best_model.pt')
             model.save_checkpoint(best_path, epoch, optimizer.state_dict())
             print(f"  ✓ New best model saved! (val_loss: {val_loss:.4f})")
     
     # Save final model
-    final_path = os.path.join(args.output_dir, 'final_model.pt')
+    final_path = os.path.join(exp_dir, 'final_model.pt')
     model.save_checkpoint(final_path, args.epochs - 1, optimizer.state_dict())
     
     # Save training history
-    with open(os.path.join(args.output_dir, 'training_history.json'), 'w') as f:
+    with open(os.path.join(exp_dir, 'training_history.json'), 'w') as f:
         json.dump(history, f, indent=2)
     
     print("\n" + "="*60)
     print("Stage 2 Training Complete!")
     print(f"Best validation loss: {best_val_loss:.4f}")
-    print(f"Checkpoints saved to: {args.output_dir}")
+    print(f"Checkpoints saved to: {exp_dir}")
     print("="*60)
 
 

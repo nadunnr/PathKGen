@@ -7,6 +7,7 @@ Handles batching of slide features and text reports with proper padding.
 import torch
 from typing import Dict, List, Any
 from transformers import PreTrainedTokenizer
+from config import TRAINING_PROMPT_TEMPLATE
 
 
 class VLMDataCollator:
@@ -24,19 +25,19 @@ class VLMDataCollator:
         tokenizer: PreTrainedTokenizer,
         max_length: int = 512,
         padding: str = "longest",
-        prompt_template: str = "Generate a detailed pathology report for this whole slide image:\n\n{report}"
+        prompt_template: str = None  # Will use config default if None
     ):
         """
         Args:
             tokenizer: HuggingFace tokenizer
             max_length: Maximum sequence length
             padding: Padding strategy ('longest' or 'max_length')
-            prompt_template: Template for formatting reports
+            prompt_template: Template for formatting reports (uses config default if None)
         """
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.padding = padding
-        self.prompt_template = prompt_template
+        self.prompt_template = prompt_template if prompt_template is not None else TRAINING_PROMPT_TEMPLATE
         
         # Ensure pad token is set
         if self.tokenizer.pad_token is None:
