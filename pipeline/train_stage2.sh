@@ -5,11 +5,14 @@ echo "Starting Stage 2 Training"
 echo "===================================================="
 
 python train_stage2.py \
-    --stage1_checkpoint checkpoints/stage1/best_model.pt \
-    --epochs 5 \
-    --batch_size 4 \
-    --gradient_accumulation_steps 4 \
+    --stage1_checkpoint /home/nadun/wd/vlm_histo/pipeline/checkpoints/stage1/2026-01-24_11-15_vt64_ml512_e12_bs2/best_model.pt \
+    --epochs 10 \
+    --train_split train,val \
+    --val_split test \
+    --batch_size 2 \
+    --gradient_accumulation_steps 8 \
     --gradient_checkpointing \
+    --val_batch_size 1 \
     --output_dir checkpoints/stage2
 
 echo ""
