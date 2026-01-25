@@ -2,9 +2,10 @@ from neo4j import GraphDatabase
 import csv
 import sys
 import json
+from collections import defaultdict
 
 
-# Increase field size limit
+# Increase field size limit bcz of large csv fields
 maxInt = sys.maxsize
 while True:
     try:
@@ -98,13 +99,28 @@ class Neo4jLoader:
                 
     def _create_relationships_batch(self, session, batch):
         """Create a batch of relationships using UNWIND (without APOC)"""
-        session.run("""
-            UNWIND $batch AS rel
-            MATCH (a:Concept {cui: rel.start_id})
-            MATCH (b:Concept {cui: rel.end_id})
-            CREATE (a)-[r:RELATED_TO {type: rel.rel_type, rela: rel.rela}]->(b)
-        """, batch=batch)
-
+        # Group relationships by type to create them with proper relationship types
+        by_type = defaultdict(list)
+        for rel in batch:
+            # Use rela if available, otherwise use rel_type, or default to RELATED_TO
+            # rel_key = rel['rela'] if rel['rela'] else (rel.get('rel_type') or 'RELATED_TO')
+            # Use rela if available, otherwise 'RELATED_TO'
+            rel_key = rel['rela'] if rel['rela'] else (rel.get('rel_type') or 'RELATED_TO')
+            by_type[rel_key].append(rel)
+        
+        # Create relationships for each type separately
+        for rel_type, rels in by_type.items():
+            # Sanitize relationship type to ensure it's a valid Cypher identifier
+            safe_rel_type = rel_type.replace('-', '_').replace(' ', '_').replace('/', '_')
+            # Skip if empty after sanitization
+            if not safe_rel_type:
+                safe_rel_type = 'RELATED_TO'
+            session.run(f"""
+                UNWIND $batch AS rel
+                MATCH (a:Concept {{cui: rel.start_id}})
+                MATCH (b:Concept {{cui: rel.end_id}})
+                CREATE (a)-[r:{safe_rel_type} {{rela: rel.rela}}]->(b)
+            """, batch=rels)
 
 class Neo4jQuery:
     def __init__(self, uri, user, password):
@@ -178,8 +194,7 @@ class Neo4jQuery:
                 "total_relationships": rels_count,
                 "top_relationship_types": rel_types
             }
-    
-    
+      
     def find_shortest_path(self, source_cui, target_cui, max_depth=5, database="neo4j"):
         """Find shortest path between two entities"""
         with self.driver.session(database=database) as session:
@@ -245,8 +260,7 @@ class Neo4jQuery:
             
             neighbors = [dict(record) for record in result]
             return neighbors
-    
-    
+   
     def get_subgraph(self, cui_list, database="neo4j"):
         """Get subgraph connecting a list of concepts"""
         with self.driver.session(database=database) as session:
@@ -283,19 +297,19 @@ class Neo4jQuery:
 
 
 if __name__ == '__main__':
-    NEO4J_URI = "http://localhost:7474"
+    NEO4J_URI = "bolt://localhost:7687"
     NEO4J_USER = "neo4j"
     NEO4J_PASSWORD = "11111111"  # Change this to your Neo4j password
     
-    NODES_CSV = "nodes.csv"
-    RELATIONSHIPS_CSV = "relationships.csv"
+    NODES_CSV = "/home/nadun/wd/datasets/UMLS_sql/UMLS_DATA/FYP/KGs/nodes.csv"
+    RELATIONSHIPS_CSV = "/home/nadun/wd/datasets/UMLS_sql/UMLS_DATA/FYP/KGs/relationships.csv"
     
     # Load data
-    # loader = Neo4jLoader(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)    
-    # loader.create_constraints()
-    # loader.load_nodes(NODES_CSV, batch_size=100000)
-    # loader.load_relationships(RELATIONSHIPS_CSV, batch_size=100000)
-    # loader.close()
+    loader = Neo4jLoader(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)    
+    loader.create_constraints()
+    loader.load_nodes(NODES_CSV, batch_size=100000)
+    loader.load_relationships(RELATIONSHIPS_CSV, batch_size=100000)
+    loader.close()
 
     query = Neo4jQuery(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)
     stats = query.get_statistics()

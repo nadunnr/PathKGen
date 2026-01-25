@@ -58,8 +58,28 @@ def get_relations_from_api(cui: str, api_key=UMLS_API_KEY) -> List[Dict]:
     except Exception:
         return []
 
+def identify_entities(doc, linker):
+    "Extract entities and their concept replaced by CUI"
+    entities = []
+    for ent in doc.ents:
+        print(ent)
+        if ent._.kb_ents:
+            cui, score = ent._.kb_ents[0]
+            entities.append(f"[{cui}]")
+        else:
+            entities.append(ent.text)
+    
+    # Replace entities in original text
+    modified_text = doc.text
+    for ent in reversed(doc.ents):  # Process in reverse to maintain offsets
+        if ent._.kb_ents:
+            cui, score = ent._.kb_ents[0]
+            modified_text = modified_text[:ent.start_char] + f"[{cui}]" + modified_text[ent.end_char:]
+    
+    return modified_text
 
-def linked_entities_with_relations(doc, linker, api_key=UMLS_API_KEY) -> pd.DataFrame:
+
+def linked_entities_with_relations(doc, linker, api_key="21b2a93f-3178-4807-b2e1-513bdbf1af8e") -> pd.DataFrame:
     """Extract linked entities AND their UMLS relations.
     Args:
         doc: spaCy Doc object
