@@ -1,192 +1,77 @@
 import pandas as pd
+import csv
+from graphs import Neo4jQuery
 
-MRCONSO_PATH = "/home/nadun/wd/datasets/UMLS_sql/2025AB/META/MRCONSO.RRF"
-MRSTY_PATH = "/home/nadun/wd/datasets/UMLS_sql/2025AB/META/MRSTY.RRF"
-MRDEF_PATH = "/home/nadun/wd/datasets/UMLS_sql/2025AB/META/MRDEF.RRF"
-MRREL_PATH = "/home/nadun/wd/datasets/UMLS_sql/2025AB/META/MRREL.RRF"
-MAX_NEIGHBORS = 12
+# Neo4j connection configuration
+NEO4J_URL = "bolt://localhost:7687"
+NEO4J_USER = "neo4j"
+NEO4J_PASSWORD = "11111111"  # Change this to your Neo4j password
+
+# CSV file paths (adjust these paths as needed)
+NODES_CSV = "/home/nadun/wd/datasets/UMLS_sql/UMLS_DATA/FYP/KGs/nodes.csv"
+RELATIONSHIPS_CSV = "/home/nadun/wd/datasets/UMLS_sql/UMLS_DATA/FYP/KGs/relationships.csv"
 
 ALLOWED_RELATIONS = {
-    "ISA",
-    "PART_OF",
-    "ASSOCIATED_WITH",
-    "HAS_LOCATION",
-    "HAS_MORPHOLOGY",
-    "CAUSES",
-    "MANIFESTATION_OF"
+    "isa",
+    "inverse_isa",
+    "has_associated_morphology"
 }
-
-ALLOWED_SEMTYPES = {
-    "Neoplastic Process",
-    "Disease or Syndrome",
-    "Pathologic Function",
-    "Tissue",
-    "Cell",
-    "Anatomical Structure"
-}
-
-def extract_subgraph_structure(seed_cui):
-    """
-    Extract subgraph structure by reading only the relations file.
-    Returns the set of CUIs needed and the edges.
-    """
-    print(f"Extracting subgraph for seed CUI: {seed_cui}")
-    
-    neighbors = []
-    
-    # Read relations file line by line to find neighbors of seed_cui
-    with open(MRREL_PATH, 'r', encoding='utf-8') as f:
-        for line in f:
-            parts = line.strip().split('|')
-            if len(parts) < 5:
-                continue
-            
-            cui1 = parts[0]
-            rel = parts[3]
-            cui2 = parts[4]
-            
-            # Only process if this is our seed CUI and relation is allowed
-            if cui1 == seed_cui and rel in ALLOWED_RELATIONS:
-                neighbors.append((cui2, rel))
-                
-                # Stop if we have enough neighbors
-                if len(neighbors) >= MAX_NEIGHBORS:
-                    break
-    
-    # Build node set and edges
-    nodes = {seed_cui}
-    edges = []
-    
-    for dst, rel in neighbors:
-        nodes.add(dst)
-        edges.append((seed_cui, dst, rel))
-    
-    print(f"Found {len(nodes)} nodes in subgraph")
-    return nodes, edges
-
-
-def load_concept_names_for_cuis(cui_set):
-    """
-    Load concept names only for the specified CUIs.
-    """
-    print(f"Loading concept names for {len(cui_set)} CUIs...")
-    cui_to_name = {}
-    
-    with open(MRCONSO_PATH, 'r', encoding='utf-8') as f:
-        for line in f:
-            parts = line.strip().split('|')
-            if len(parts) < 15:
-                continue
-            
-            cui = parts[0]
-            
-            # Only process if this CUI is in our set
-            if cui not in cui_set:
-                continue
-            
-            # Check if it's English preferred term
-            lat = parts[1]
-            ispref = parts[6]
-            name = parts[14]
-            
-            if lat == "ENG" and ispref == "Y":
-                # Only store if we haven't seen this CUI yet
-                if cui not in cui_to_name:
-                    cui_to_name[cui] = name
-            
-            # Early exit if we've found all CUIs
-            if len(cui_to_name) == len(cui_set):
-                break
-    
-    return cui_to_name
-
-
-def load_semantic_types_for_cuis(cui_set):
-    """
-    Load semantic types only for the specified CUIs.
-    """
-    print(f"Loading semantic types for {len(cui_set)} CUIs...")
-    cui_to_semtype = {}
-    
-    with open(MRSTY_PATH, 'r', encoding='utf-8') as f:
-        for line in f:
-            parts = line.strip().split('|')
-            if len(parts) < 4:
-                continue
-            
-            cui = parts[0]
-            sty = parts[3]
-            
-            # Only process if this CUI is in our set
-            if cui in cui_set:
-                if cui not in cui_to_semtype:
-                    cui_to_semtype[cui] = []
-                cui_to_semtype[cui].append(sty)
-    
-    return cui_to_semtype
-
-
-def load_definitions_for_cuis(cui_set):
-    """
-    Load definitions only for the specified CUIs.
-    """
-    print(f"Loading definitions for {len(cui_set)} CUIs...")
-    cui_to_def = {}
-    
-    with open(MRDEF_PATH, 'r', encoding='utf-8') as f:
-        for line in f:
-            parts = line.strip().split('|')
-            if len(parts) < 6:
-                continue
-            
-            cui = parts[0]
-            definition = parts[5]
-            
-            # Only process if this CUI is in our set and we haven't seen it yet
-            if cui in cui_set and cui not in cui_to_def:
-                cui_to_def[cui] = definition
-            
-            # Early exit if we've found all CUIs
-            if len(cui_to_def) == len(cui_set):
-                break
-    
-    return cui_to_def
-
-
-def filter_nodes(nodes, edges, cui_to_semtype, seed_cui):
-    """
-    Filter nodes based on semantic types.
-    """
-    filtered = set()
-    
-    for cui in nodes:
-        semtypes = set(cui_to_semtype.get(cui, []))
-        if semtypes & ALLOWED_SEMTYPES or cui == seed_cui:
-            filtered.add(cui)
-    
-    filtered_edges = [
-        e for e in edges
-        if e[0] in filtered and e[1] in filtered
-    ]
-    
-    print(f"Filtered to {len(filtered)} nodes after semantic type filtering")
-    return filtered, filtered_edges
-
 
 REL_TEMPLATES = {
-    "ISA": "{A} is a type of {B}.",
-    "PART_OF": "{A} is part of {B}.",
-    "ASSOCIATED_WITH": "{A} is associated with {B}.",
-    "HAS_LOCATION": "{A} occurs in {B}.",
-    "HAS_MORPHOLOGY": "{A} shows morphology of {B}.",
-    "CAUSES": "{A} can cause {B}.",
-    "MANIFESTATION_OF": "{A} is a manifestation of {B}."
+    "isa": "{A} is a type of {B}.",
+    "inverse_isa": "{B} is a type of {A}.",
+    "has_associated_morphology": "{A} shows morphology of {B}."
 }
 
-
-def build_prompt(nodes, edges, cui_to_name, cui_to_semtype, cui_to_def):
+def extract_local_subgraph(seed_cui, max_neighbors=500):
     """
-    Build the knowledge prompt from the subgraph.
+    Extract local subgraph structure using Neo4j. Returns the neighbours and corresponding edges of the seed CUI
+    Returns:
+        - nodes: set of CUIs
+        - edges: list of tuples (source_cui, target_cui, rel_type)
+        - cui_to_name: dictionary mapping CUI to name
+    Only queries the graph database, doesn't load full CSV files.
+    """
+    # Start neo4j query
+    query = Neo4jQuery(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
+    
+    nodes = set()
+    edges = []
+    cui_to_name = {}
+    
+    # Add seed node and get its name
+    nodes.add(seed_cui)
+    seed_entity = query.get_entity_by_cui(seed_cui)
+    if seed_entity:
+        cui_to_name[seed_cui] = seed_entity['name']
+    
+    # Get neighbors of the seed CUI
+    neighbors = query.get_neighbors(seed_cui, direction="incoming", limit=max_neighbors)
+
+    for neighbor in neighbors:
+        # Get neighbor CUI
+        neighbor_cui = neighbor['cui'] 
+
+        # Get neighbor name
+        neighbor_name = neighbor['name']
+
+        # Get neighbor relation
+        neighbor_relation = neighbor['rela']
+        
+        # Filter by allowed relations
+        if neighbor_relation in ALLOWED_RELATIONS and neighbor_cui not in nodes:
+            nodes.add(neighbor_cui)
+            cui_to_name[neighbor_cui] = neighbor_name
+            # Store edge as (source, target, relation_type)
+            edges.append((seed_cui, neighbor_cui, neighbor_relation))
+    
+    query.close()
+    print(f"Extracted subgraph: {len(nodes)} nodes, {len(edges)} edges")
+    return nodes, edges, cui_to_name
+
+def build_prompt(nodes, edges, cui_to_name):
+    """
+    Build the knowledge prompt from the local subgraph.
     """
     lines = []
     lines.append("Relevant medical knowledge:\n")
@@ -194,13 +79,7 @@ def build_prompt(nodes, edges, cui_to_name, cui_to_semtype, cui_to_def):
     # - Entity summaries -
     for cui in nodes:
         name = cui_to_name.get(cui, cui)
-        definition = cui_to_def.get(cui, "")
-        semtypes = ", ".join(cui_to_semtype.get(cui, []))
-        
-        if definition:
-            lines.append(f"{name}: {definition}")
-        else:
-            lines.append(f"{name} ({semtypes})")
+        lines.append(f"{name}")
     
     # - Relations -
     lines.append("\nKey relationships:\n")
@@ -215,24 +94,17 @@ def build_prompt(nodes, edges, cui_to_name, cui_to_semtype, cui_to_def):
     
     return "\n".join(lines)
 
-
 # Main execution
-SEED_CUI = "C0206692"   # change to yours
+if __name__ == "__main__":
+    SEED_CUI = "C0007134"   # change to yours
+    
+    # Step 1: Extract a local subgraph structure (filtered by allowed relations)
+    nodes, edges, cui_to_name = extract_local_subgraph(SEED_CUI)
+    
+    # Step 2: Build and print the prompt
+    prompt = build_prompt(nodes, edges, cui_to_name)
+    
+    print("\n" + "="*80)
+    print(prompt)
+    print("="*80)
 
-# Step 1: Extract subgraph structure (only reads relations file)
-nodes, edges = extract_subgraph_structure(SEED_CUI)
-
-# Step 2: Load metadata only for the CUIs in the subgraph
-cui_to_name = load_concept_names_for_cuis(nodes)
-cui_to_semtype = load_semantic_types_for_cuis(nodes)
-cui_to_def = load_definitions_for_cuis(nodes)
-
-# Step 3: Filter nodes based on semantic types
-nodes, edges = filter_nodes(nodes, edges, cui_to_semtype, SEED_CUI)
-
-# Step 4: Build and print the prompt
-prompt = build_prompt(nodes, edges, cui_to_name, cui_to_semtype, cui_to_def)
-
-print("\n" + "="*80)
-print(prompt)
-print("="*80)
