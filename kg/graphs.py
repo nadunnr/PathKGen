@@ -121,6 +121,48 @@ class Neo4jLoader:
                 MATCH (b:Concept {{cui: rel.end_id}})
                 CREATE (a)-[r:{safe_rel_type} {{rela: rel.rela}}]->(b)
             """, batch=rels)
+            
+    def update_node_definitions(self, csv_file, batch_size=1000, database="neo4j"):
+        """Update existing nodes with definitions from CSV file"""
+        with self.driver.session(database=database) as session:
+            batch = []
+            count = 0
+            updated = 0
+            
+            with open(csv_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                
+                for row in reader:
+                    cui = row.get('cui:ID')
+                    definition = row.get('definition', '')
+                    
+                    if cui and definition:
+                        batch.append({'cui': cui, 'definition': definition})
+                        count += 1
+                        
+                        if len(batch) >= batch_size:
+                            result = self._update_definitions_batch(session, batch)
+                            updated += result
+                            print(f"  Processed {count} definitions, updated {updated} nodes...")
+                            batch = []
+                
+                # Update remaining definitions
+                if batch:
+                    result = self._update_definitions_batch(session, batch)
+                    updated += result
+                    
+            print(f"Total processed: {count} definitions, updated: {updated} nodes")
+    
+    def _update_definitions_batch(self, session, batch):
+        """Update a batch of nodes with definitions"""
+        result = session.run("""
+            UNWIND $batch AS item
+            MATCH (c:Concept {cui: item.cui})
+            SET c.definition = item.definition
+            RETURN count(c) as updated
+        """, batch=batch)
+        return result.single()['updated']
+
 
 class Neo4jQuery:
     def __init__(self, uri, user, password):
@@ -164,7 +206,7 @@ class Neo4jQuery:
             result = session.run("""
                 MATCH (c:Concept {cui: $cui})-[r]-(related:Concept)
                 RETURN c.cui as source_cui, c.name as source_name,
-                       type(r) as rel_type, r.type as rel_subtype, r.rela as rela,
+                       r.rela as rela,
                        related.cui as target_cui, related.name as target_name
                 LIMIT $limit
             """, cui=cui, limit=limit)
@@ -259,7 +301,7 @@ class Neo4jQuery:
                 MATCH (c:Concept {{cui: $cui}}){direction_clause}(neighbor:Concept)
                 WHERE c <> neighbor {type_filter}
                 RETURN neighbor.cui as cui, neighbor.name as name, 
-                       type(r) as rel_type, r.rela as rela
+                       r.rela as rela
                 LIMIT $limit
             """, cui=cui, limit=limit)
             
@@ -273,7 +315,7 @@ class Neo4jQuery:
                 MATCH (source:Concept)-[r]->(target:Concept)
                 WHERE source.cui IN $cui_list AND target.cui IN $cui_list
                 RETURN source.cui as source_cui, source.name as source_name,
-                       type(r) as rel_type, r.rela as rela,
+                       r.rela as rela,
                        target.cui as target_cui, target.name as target_name
             """, cui_list=cui_list)
             
@@ -522,7 +564,9 @@ class Neo4jQuery:
                     })
         
         return tree_records
-    
+
+
+
 if __name__ == '__main__':
     NEO4J_URL = "bolt://localhost:7687"
     NEO4J_USER = "neo4j"
@@ -534,162 +578,163 @@ if __name__ == '__main__':
     # ============================================================
     # EXPERIMENT 1: Load data (uncomment to load)
     # ============================================================
-    # loader = Neo4jLoader(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)    
+    loader = Neo4jLoader(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)  
+    loader.update_node_definitions("/home/nadun/wd/datasets/UMLS_sql/UMLS_DATA/FYP/KGs/definitions.csv", batch_size=1000)  
     # loader.create_constraints()
     # loader.load_nodes(NODES_CSV, batch_size=100000)
     # loader.load_relationships(RELATIONSHIPS_CSV, batch_size=100000)
     # loader.close()
 
-    query = Neo4jQuery(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
+    # query = Neo4jQuery(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
+    # print(query.get_neighbors("C0206685", direction="outgoing", limit=50))
+    # # ============================================================
+    # # EXPERIMENT 2: Database Statistics
+    # # ============================================================
+    # print("\n" + "="*60)
+    # print("EXPERIMENT 2: Database Statistics")
+    # print("="*60)
+    # stats = query.get_statistics()
+    # print(json.dumps(stats, indent=2))
     
-    # ============================================================
-    # EXPERIMENT 2: Database Statistics
-    # ============================================================
-    print("\n" + "="*60)
-    print("EXPERIMENT 2: Database Statistics")
-    print("="*60)
-    stats = query.get_statistics()
-    print(json.dumps(stats, indent=2))
+    # # ============================================================
+    # # EXPERIMENT 3: Search for entities
+    # # ============================================================
+    # print("\n" + "="*60)
+    # print("EXPERIMENT 3: Search for entities")
+    # print("="*60)
+    # search_term = "carcinoma"  # Change this to search for different terms
+    # print(f"Searching for: '{search_term}'")
+    # entities = query.search_entity(search_term)
+    # print(f"Found {len(entities)} entities:")
+    # for i, entity in enumerate(entities[:5], 1):  # Show first 5
+    #     print(f"  {i}. {entity['cui']}: {entity['name']}")
     
-    # ============================================================
-    # EXPERIMENT 3: Search for entities
-    # ============================================================
-    print("\n" + "="*60)
-    print("EXPERIMENT 3: Search for entities")
-    print("="*60)
-    search_term = "carcinoma"  # Change this to search for different terms
-    print(f"Searching for: '{search_term}'")
-    entities = query.search_entity(search_term)
-    print(f"Found {len(entities)} entities:")
-    for i, entity in enumerate(entities[:5], 1):  # Show first 5
-        print(f"  {i}. {entity['cui']}: {entity['name']}")
+    # # ============================================================
+    # # EXPERIMENT 4: Get entity relationships
+    # # ============================================================
+    # if entities:
+    #     print("\n" + "="*60)
+    #     print("EXPERIMENT 4: Entity Relationships")
+    #     print("="*60)
+    #     test_cui = entities[0]['cui']
+    #     print(f"Getting relationships for: {test_cui} ({entities[0]['name']})")
+    #     relationships = query.get_entity_relationships(test_cui, limit=10)
+    #     print(f"Found {len(relationships)} relationships:")
+    #     for i, rel in enumerate(relationships[:5], 1):  # Show first 5
+    #         print(f"  {i}. {rel['source_name']} --[{rel['rel_type']}/{rel['rela']}]--> {rel['target_name']}")
     
-    # ============================================================
-    # EXPERIMENT 4: Get entity relationships
-    # ============================================================
-    if entities:
-        print("\n" + "="*60)
-        print("EXPERIMENT 4: Entity Relationships")
-        print("="*60)
-        test_cui = entities[0]['cui']
-        print(f"Getting relationships for: {test_cui} ({entities[0]['name']})")
-        relationships = query.get_entity_relationships(test_cui, limit=10)
-        print(f"Found {len(relationships)} relationships:")
-        for i, rel in enumerate(relationships[:5], 1):  # Show first 5
-            print(f"  {i}. {rel['source_name']} --[{rel['rel_type']}/{rel['rela']}]--> {rel['target_name']}")
+    # # ============================================================
+    # # EXPERIMENT 5: Get neighbors
+    # # ============================================================
+    # if entities:
+    #     print("\n" + "="*60)
+    #     print("EXPERIMENT 5: Get Neighbors")
+    #     print("="*60)
+    #     test_cui = entities[0]['cui']
+    #     print(f"Getting neighbors for: {test_cui}")
+    #     neighbors = query.get_neighbors(test_cui, direction="both", limit=10)
+    #     print(f"Found {len(neighbors)} neighbors:")
+    #     for i, neighbor in enumerate(neighbors[:5], 1):
+    #         print(f"  {i}. {neighbor['name']} (via {neighbor['rel_type']})")
     
-    # ============================================================
-    # EXPERIMENT 5: Get neighbors
-    # ============================================================
-    if entities:
-        print("\n" + "="*60)
-        print("EXPERIMENT 5: Get Neighbors")
-        print("="*60)
-        test_cui = entities[0]['cui']
-        print(f"Getting neighbors for: {test_cui}")
-        neighbors = query.get_neighbors(test_cui, direction="both", limit=10)
-        print(f"Found {len(neighbors)} neighbors:")
-        for i, neighbor in enumerate(neighbors[:5], 1):
-            print(f"  {i}. {neighbor['name']} (via {neighbor['rel_type']})")
-    
-    # ============================================================
-    # EXPERIMENT 6: Find shortest path between two concepts
-    # ============================================================
-    if len(entities) >= 2:
-        print("\n" + "="*60)
-        print("EXPERIMENT 6: Shortest Path")
-        print("="*60)
-        source_cui = entities[0]['cui']
-        target_cui = entities[1]['cui']
-        print(f"Finding path from {entities[0]['name']} to {entities[1]['name']}")
-        path = query.find_shortest_path(source_cui, target_cui, max_depth=5)
-        if path:
-            print(f"Path length: {path['length']}")
-            print("Path:")
-            for i, node in enumerate(path['nodes']):
-                print(f"  {i+1}. {node['name']} ({node['cui']})")
-                if i < len(path['relationships']):
-                    print(f"      └─[{path['relationships'][i]['type']}]→")
-        else:
-            print("No path found")
+    # # ============================================================
+    # # EXPERIMENT 6: Find shortest path between two concepts
+    # # ============================================================
+    # if len(entities) >= 2:
+    #     print("\n" + "="*60)
+    #     print("EXPERIMENT 6: Shortest Path")
+    #     print("="*60)
+    #     source_cui = entities[0]['cui']
+    #     target_cui = entities[1]['cui']
+    #     print(f"Finding path from {entities[0]['name']} to {entities[1]['name']}")
+    #     path = query.find_shortest_path(source_cui, target_cui, max_depth=5)
+    #     if path:
+    #         print(f"Path length: {path['length']}")
+    #         print("Path:")
+    #         for i, node in enumerate(path['nodes']):
+    #             print(f"  {i+1}. {node['name']} ({node['cui']})")
+    #             if i < len(path['relationships']):
+    #                 print(f"      └─[{path['relationships'][i]['type']}]→")
+    #     else:
+    #         print("No path found")
     
     
-    # ============================================================
-    # EXPERIMENT 9: Get subgraph
-    # ============================================================
-    if len(entities) >= 3:
-        print("\n" + "="*60)
-        print("EXPERIMENT 9: Subgraph Extraction")
-        print("="*60)
-        cui_list = [e['cui'] for e in entities[:3]]
-        print(f"Getting subgraph for {len(cui_list)} concepts")
-        subgraph = query.get_subgraph(cui_list)
-        print(f"Found {len(subgraph)} edges in subgraph:")
-        for edge in subgraph[:5]:
-            print(f"  {edge['source_name']} --[{edge['rel_type']}]--> {edge['target_name']}")
+    # # ============================================================
+    # # EXPERIMENT 9: Get subgraph
+    # # ============================================================
+    # if len(entities) >= 3:
+    #     print("\n" + "="*60)
+    #     print("EXPERIMENT 9: Subgraph Extraction")
+    #     print("="*60)
+    #     cui_list = [e['cui'] for e in entities[:3]]
+    #     print(f"Getting subgraph for {len(cui_list)} concepts")
+    #     subgraph = query.get_subgraph(cui_list)
+    #     print(f"Found {len(subgraph)} edges in subgraph:")
+    #     for edge in subgraph[:5]:
+    #         print(f"  {edge['source_name']} --[{edge['rel_type']}]--> {edge['target_name']}")
     
-    # ============================================================
-    # EXPERIMENT 10: Steiner Tree Extraction
-    # ============================================================
-    if len(entities) >= 3:
-        print("\n" + "="*60)
-        print("EXPERIMENT 10: Steiner Tree Extraction")
-        print("="*60)
+    # # ============================================================
+    # # EXPERIMENT 10: Steiner Tree Extraction
+    # # ============================================================
+    # if len(entities) >= 3:
+    #     print("\n" + "="*60)
+    #     print("EXPERIMENT 10: Steiner Tree Extraction")
+    #     print("="*60)
         
-        # Include the first 4 carcinoma entities plus 2 distant concepts
-        cui_list = [e['cui'] for e in entities[:4]]  # First 4 carcinomas
+    #     # Include the first 4 carcinoma entities plus 2 distant concepts
+    #     cui_list = [e['cui'] for e in entities[:4]]  # First 4 carcinomas
         
-        # Add 2 conceptually distant nodes to test longer paths
-        # Search for inflammation (common condition, likely farther from carcinoma)
-        distant_concepts = query.search_entity("inflammation")
-        if distant_concepts:
-            cui_list.append(distant_concepts[0]['cui'])
+    #     # Add 2 conceptually distant nodes to test longer paths
+    #     # Search for inflammation (common condition, likely farther from carcinoma)
+    #     distant_concepts = query.search_entity("inflammation")
+    #     if distant_concepts:
+    #         cui_list.append(distant_concepts[0]['cui'])
         
-        # Search for diabetes (metabolic disease, very different from carcinoma)
-        metabolic_concepts = query.search_entity("diabetes mellitus")
-        if metabolic_concepts:
-            cui_list.append(metabolic_concepts[0]['cui'])
+    #     # Search for diabetes (metabolic disease, very different from carcinoma)
+    #     metabolic_concepts = query.search_entity("diabetes mellitus")
+    #     if metabolic_concepts:
+    #         cui_list.append(metabolic_concepts[0]['cui'])
         
-        print(f"Building Steiner tree for {len(cui_list)} concepts:")
-        print(f"  (Including {len(cui_list) - 4} distant nodes to test path discovery)\n")
-        for i, cui in enumerate(cui_list, 1):
-            entity = query.get_entity_by_cui(cui)
-            if entity:
-                marker = " [DISTANT]" if i > 4 else ""
-                print(f"  {i}. {entity['name']} ({cui}){marker}")
+    #     print(f"Building Steiner tree for {len(cui_list)} concepts:")
+    #     print(f"  (Including {len(cui_list) - 4} distant nodes to test path discovery)\n")
+    #     for i, cui in enumerate(cui_list, 1):
+    #         entity = query.get_entity_by_cui(cui)
+    #         if entity:
+    #             marker = " [DISTANT]" if i > 4 else ""
+    #             print(f"  {i}. {entity['name']} ({cui}){marker}")
         
-        try:
-            tree = query.steiner_tree_retrieval(cui_list)
-            print(f"\nSteiner Tree Results (using {tree['method'].upper()} method):")
-            print(f"  - Optimal source: {tree['source_cui']}")
-            entity = query.get_entity_by_cui(tree['source_cui'])
-            if entity:
-                print(f"    ({entity['name']})")
-            print(f"  - Total weight: {tree['total_weight']}")
-            print(f"  - Nodes in tree: {len(tree['tree_nodes'])}")
-            print(f"  - Edges in tree: {len(tree['tree_edges'])}")
-            print(f"  - Steiner nodes discovered: {len(tree['tree_nodes']) - len(cui_list)}")
+    #     try:
+    #         tree = query.steiner_tree_retrieval(cui_list)
+    #         print(f"\nSteiner Tree Results (using {tree['method'].upper()} method):")
+    #         print(f"  - Optimal source: {tree['source_cui']}")
+    #         entity = query.get_entity_by_cui(tree['source_cui'])
+    #         if entity:
+    #             print(f"    ({entity['name']})")
+    #         print(f"  - Total weight: {tree['total_weight']}")
+    #         print(f"  - Nodes in tree: {len(tree['tree_nodes'])}")
+    #         print(f"  - Edges in tree: {len(tree['tree_edges'])}")
+    #         print(f"  - Steiner nodes discovered: {len(tree['tree_nodes']) - len(cui_list)}")
             
-            print(f"\nTree structure:")
-            for edge in tree['tree_edges']:
-                rel_info = f"{edge.get('rel_type', 'RELATED_TO')}"
-                if edge.get('rela'):
-                    rel_info += f"/{edge['rela']}"
-                print(f"  {edge['source_name']} --[{rel_info}, w={edge['weight']}]--> {edge['target_name']}")
+    #         print(f"\nTree structure:")
+    #         for edge in tree['tree_edges']:
+    #             rel_info = f"{edge.get('rel_type', 'RELATED_TO')}"
+    #             if edge.get('rela'):
+    #                 rel_info += f"/{edge['rela']}"
+    #             print(f"  {edge['source_name']} --[{rel_info}, w={edge['weight']}]--> {edge['target_name']}")
             
-            print(f"\nAll nodes in tree:")
-            original_cuis = set(cui_list)
-            for node in tree['tree_nodes']:
-                marker = " [STEINER NODE]" if node['cui'] not in original_cuis else ""
-                print(f"  - {node['name']} ({node['cui']}){marker}")
-        except Exception as e:
-            print(f"Error: {e}")
-            import traceback
-            traceback.print_exc()
+    #         print(f"\nAll nodes in tree:")
+    #         original_cuis = set(cui_list)
+    #         for node in tree['tree_nodes']:
+    #             marker = " [STEINER NODE]" if node['cui'] not in original_cuis else ""
+    #             print(f"  - {node['name']} ({node['cui']}){marker}")
+    #     except Exception as e:
+    #         print(f"Error: {e}")
+    #         import traceback
+    #         traceback.print_exc()
     
-    query.close()
-    print("\n" + "="*60)
-    print("All experiments completed!")
-    print("="*60)
+    # query.close()
+    # print("\n" + "="*60)
+    # print("All experiments completed!")
+    # print("="*60)
 
 
