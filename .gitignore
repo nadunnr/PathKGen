@@ -30,3 +30,5 @@ kg/docs/
 kg/test.ipynb
 kg/tmp/
 pipeline/tmp/
+kg/nodes.csv
+kg/relationships.csv
