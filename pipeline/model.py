@@ -176,16 +176,26 @@ class VisionLanguageModel(nn.Module):
     def _load_slidechat_weights(self, checkpoint_path: str):
         """Load SlideChat pathology-specific weights into the LLM."""
         try:
+            print(f"Loading SlideChat weights (this may take a moment)...")
+            # Load to CPU first, but we'll immediately move to GPU
             state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
             
             # Clean state dict (remove 'model.' prefix and vision components)
+            # Do this in-place to save RAM
             new_state_dict = {}
             for key, value in state_dict.items():
                 if key.startswith("model."):
                     clean_key = key.replace("model.", "")
                     # Skip vision-only parameters
                     if "mm_projector" not in clean_key and "slide_encoder" not in clean_key:
-                        new_state_dict[clean_key] = value
+                        # Move to device immediately to free CPU RAM
+                        new_state_dict[clean_key] = value.to(self.device)
+            
+            # Delete original state_dict to free RAM immediately
+            del state_dict
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
             
             # Load into LLM (strict=False to allow missing vision keys)
             if self.use_qlora:
@@ -193,6 +203,11 @@ class VisionLanguageModel(nn.Module):
                 msg = self.llm.base_model.model.load_state_dict(new_state_dict, strict=False)
             else:
                 msg = self.llm.load_state_dict(new_state_dict, strict=False)
+            
+            # Clean up
+            del new_state_dict
+            gc.collect()
+            torch.cuda.empty_cache()
             
             print(f"✓ SlideChat weights loaded successfully")
             print(f"  - Missing keys: {len(msg.missing_keys)} (expected for vision components)")
@@ -247,26 +262,33 @@ class VisionLanguageModel(nn.Module):
         # 3. Concatenate visual tokens before text
         combined_embeds = torch.cat([visual_tokens, inputs_embeds], dim=1)  # [batch, num_visual_tokens + seq_len, hidden_dim]
         
+        # Free intermediate embeddings (combined_embeds is a new tensor)
+        del visual_tokens, inputs_embeds
+        
         # 4. Adjust attention mask to include visual tokens
         if attention_mask is not None:
             visual_attention = torch.ones(
-                batch_size, visual_tokens.shape[1],
+                batch_size, self.projection.num_visual_tokens,
                 dtype=attention_mask.dtype,
                 device=attention_mask.device  
             )
             combined_attention_mask = torch.cat([visual_attention, attention_mask], dim=1)
+            # Clean up intermediate
+            del visual_attention
         else:
             combined_attention_mask = None
         
         # 5. Adjust labels to include visual tokens (set to -100 for ignore)
         if labels is not None:
             visual_labels = torch.full(
-                (batch_size, visual_tokens.shape[1]),
+                (batch_size, self.projection.num_visual_tokens),
                 -100,
                 dtype=labels.dtype,
                 device=labels.device
             )
             combined_labels = torch.cat([visual_labels, labels], dim=1)
+            # Clean up intermediate
+            del visual_labels
         else:
             combined_labels = None
         
@@ -376,7 +398,7 @@ class VisionLanguageModel(nn.Module):
         
         return self
     
-    def save_checkpoint(self, save_path: str, epoch: int, optimizer_state: Optional[dict] = None):
+    def save_checkpoint(self, save_path: str, epoch: int, optimizer_state: Optional[dict] = None, val_loss: Optional[float] = None):
         """Save model checkpoint."""
         checkpoint = {
             'epoch': epoch,
@@ -396,6 +418,9 @@ class VisionLanguageModel(nn.Module):
         
         if optimizer_state is not None:
             checkpoint['optimizer_state_dict'] = optimizer_state
+        
+        if val_loss is not None:
+            checkpoint['val_loss'] = val_loss
         
         torch.save(checkpoint, save_path)
         print(f"Checkpoint saved to {save_path}")

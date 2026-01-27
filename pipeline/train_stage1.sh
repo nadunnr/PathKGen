@@ -1,7 +1,7 @@
 #!/bin/bash
 # Memory-optimized training script for Stage 1
 
-epochs=12
+epochs=1
 batch_size=2
 gradient_accumulation_steps=8
 max_length=512

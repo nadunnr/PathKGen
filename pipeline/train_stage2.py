@@ -100,6 +100,10 @@ def parse_args():
                        help="Resume training from Stage 2 checkpoint")
     
     # Misc
+    parser.add_argument("--compute_metrics_during_training", action="store_true",
+                       help="Compute NLP metrics during validation (slow). If False, only compute AR loss and evaluate best model at end.")
+    parser.add_argument("--skip_final_metrics", action="store_true",
+                       help="Skip computing NLP metrics at end of training (only use if metrics computed during training).")
     parser.add_argument("--seed", type=int, default=42,
                        help="Random seed")
     parser.add_argument("--log_every", type=int, default=10,
@@ -147,12 +151,17 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device):
         loss = loss / args.gradient_accumulation_steps
         loss.backward()
         
+        # Free memory from forward pass immediately
+        del outputs
+        
         # Optimizer step
         if (step + 1) % args.gradient_accumulation_steps == 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad()
+            # Clear cache after optimizer step
+            torch.cuda.empty_cache()
         
         total_loss += loss.item() * args.gradient_accumulation_steps
         
@@ -168,8 +177,13 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device):
 
 
 @torch.no_grad()
-def validate(model, dataloader, epoch, args, device, tokenizer=None):
-    """Validate the model with loss and generation metrics."""
+def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_metrics=False):
+    """Validate the model with loss and optionally generation metrics.
+    
+    Args:
+        compute_metrics: If True, generate text and compute NLP metrics (slow).
+                        If False, only compute AR loss (fast, default during training).
+    """
     model.eval()
     total_loss = 0
     num_samples = 0
@@ -211,8 +225,8 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None):
             del outputs, single_input, single_mask, single_labels
             torch.cuda.empty_cache()
             
-            # Generate prediction for metrics
-            if tokenizer is not None:
+            # Generate prediction for metrics (only if requested)
+            if compute_metrics and tokenizer is not None:
                 # Temporarily disable gradient checkpointing for generation
                 if hasattr(model.llm, 'gradient_checkpointing_disable'):
                     model.llm.gradient_checkpointing_disable()
@@ -258,10 +272,102 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None):
     
     metrics = {}
     if len(all_predictions) > 0:
-        from metrics import compute_metrics
-        metrics = compute_metrics(all_predictions, all_references)
+        from metrics import compute_metrics as calc_metrics
+        metrics = calc_metrics(all_predictions, all_references)
     
     return avg_loss, metrics
+
+
+@torch.no_grad()
+def evaluate_best_model(checkpoint_path, args, device):
+    """Evaluate the best model with full NLP metrics after training completes."""
+    print("\n" + "="*60)
+    print("Evaluating Best Model with Full NLP Metrics")
+    print("="*60)
+    
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(args.llm_path)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    # Create validation dataset
+    val_dataset = WSI_Report_Dataset(
+        json_path=args.data_json,
+        split=args.val_split,
+        feature_key=args.feature_key
+    )
+    
+    # Create data collator
+    data_collator = VLMDataCollator(
+        tokenizer=tokenizer,
+        max_length=args.max_length
+    )
+    
+    # Create validation dataloader
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=args.val_batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        collate_fn=data_collator,
+        pin_memory=True
+    )
+    
+    # Load model (on CPU first to save GPU memory)
+    model = VisionLanguageModel(
+        llm_path=args.llm_path,
+        visual_dim=args.visual_dim,
+        num_visual_tokens=args.num_visual_tokens,
+        slidechat_checkpoint=args.slidechat_checkpoint,
+        use_qlora=True,
+        freeze_llm=False,
+        gradient_checkpointing=False,  # Disable for inference
+        device='cpu'  # Initialize on CPU first
+    )
+    
+    # Load checkpoint from disk to CPU
+    print(f"\nLoading checkpoint to CPU: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+    
+    # Load weights using model's method (handles projection + LoRA separately)
+    model.projection.load_state_dict(checkpoint['projection_state_dict'])
+    if 'lora_state_dict' in checkpoint:
+        model.llm.load_state_dict(checkpoint['lora_state_dict'], strict=False)
+    
+    print(f"Loaded checkpoint from: {checkpoint_path}")
+    print(f"Checkpoint epoch: {checkpoint['epoch']+1}")
+    print(f"Checkpoint val loss: {checkpoint['val_loss']:.4f}")
+    
+    # Store epoch before deleting checkpoint
+    checkpoint_epoch = checkpoint['epoch']
+    
+    # Free checkpoint memory immediately
+    del checkpoint
+    torch.cuda.empty_cache()
+    import gc
+    gc.collect()
+    
+    # Now move model to GPU
+    print(f"Moving model to {device}...")
+    model = model.to(device)
+    
+    # Evaluate with full metrics
+    val_loss, metrics = validate(
+        model, val_loader, checkpoint_epoch, args, device,
+        tokenizer=tokenizer, compute_metrics=True
+    )
+    
+    print("\nFinal Evaluation Results:")
+    print(f"  Val Loss: {val_loss:.4f}")
+    if metrics:
+        print(f"  BLEU-1: {metrics.get('bleu1', 0):.2f}  "
+              f"BLEU-2: {metrics.get('bleu2', 0):.2f}  "
+              f"BLEU-3: {metrics.get('bleu3', 0):.2f}  "
+              f"BLEU-4: {metrics.get('bleu4', 0):.2f}")
+        print(f"  METEOR: {metrics.get('meteor', 0):.2f}  "
+              f"ROUGE-L: {metrics.get('rouge_l', 0):.2f}")
+    
+    return val_loss, metrics
 
 
 def main():
@@ -359,6 +465,10 @@ def main():
     model.projection.load_state_dict(checkpoint['projection_state_dict'])
     print("✓ Projection weights loaded from Stage 1")
     
+    # Free checkpoint memory immediately
+    del checkpoint
+    torch.cuda.empty_cache()
+    
     total_params, trainable_params = model.count_parameters()
     print(f"\nModel parameters:")
     print(f"  Total: {total_params:,}")
@@ -396,6 +506,7 @@ def main():
     # Resume from checkpoint if specified
     start_epoch = 0
     best_val_loss = float('inf')
+    best_epoch = -1
     
     if args.resume_from is not None:
         print(f"\nResuming from checkpoint: {args.resume_from}")
@@ -425,45 +536,90 @@ def main():
         train_loss = train_epoch(model, train_loader, optimizer, scheduler, epoch, args, device)
         history['train_loss'].append(train_loss)
         
-        # Validate (with metrics)
-        val_loss, metrics = validate(model, val_loader, epoch, args, device, tokenizer)
+        # Aggressive memory cleanup between training and validation
+        torch.cuda.empty_cache()
+        import gc
+        gc.collect()
+        
+        # Validate (fast mode: only AR loss unless user requested full metrics)
+        compute_metrics_now = args.compute_metrics_during_training
+        val_loss, val_metrics = validate(
+            model, val_loader, epoch, args, device, tokenizer,
+            compute_metrics=compute_metrics_now
+        )
         history['val_loss'].append(val_loss)
         
         # Store metrics
         for key in ['bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor', 'rouge_l']:
-            history[key].append(metrics.get(key, 0.0))
+            history[key].append(val_metrics.get(key, 0.0))
         
+        # Print epoch summary
         print(f"\nEpoch {epoch+1}/{args.epochs}:")
         print(f"  Train Loss: {train_loss:.4f}")
         print(f"  Val Loss: {val_loss:.4f}")
-        if metrics:
-            print(f"  BLEU-1: {metrics.get('bleu1', 0):.2f}  BLEU-2: {metrics.get('bleu2', 0):.2f}  BLEU-3: {metrics.get('bleu3', 0):.2f}  BLEU-4: {metrics.get('bleu4', 0):.2f}")
-            print(f"  METEOR: {metrics.get('meteor', 0):.2f}  ROUGE-L: {metrics.get('rouge_l', 0):.2f}")
+        if val_metrics:
+            print(f"  BLEU-1: {val_metrics.get('bleu1', 0):.2f}  "
+                  f"BLEU-2: {val_metrics.get('bleu2', 0):.2f}  "
+                  f"BLEU-3: {val_metrics.get('bleu3', 0):.2f}  "
+                  f"BLEU-4: {val_metrics.get('bleu4', 0):.2f}")
+            print(f"  METEOR: {val_metrics.get('meteor', 0):.2f}  "
+                  f"ROUGE-L: {val_metrics.get('rouge_l', 0):.2f}")
+        elif not args.compute_metrics_during_training:
+            print("  (NLP metrics will be computed for best model at end of training)")
         
         # Save checkpoint
         if (epoch + 1) % args.save_every == 0:
             save_path = os.path.join(exp_dir, f'checkpoint_epoch_{epoch+1}.pt')
-            model.save_checkpoint(save_path, epoch, optimizer.state_dict())
+            model.save_checkpoint(save_path, epoch, optimizer.state_dict(), val_loss=val_loss)
         
         # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            best_epoch = epoch
             best_path = os.path.join(exp_dir, 'best_model.pt')
-            model.save_checkpoint(best_path, epoch, optimizer.state_dict())
+            model.save_checkpoint(best_path, epoch, optimizer.state_dict(), val_loss=val_loss)
             print(f"  ✓ New best model saved! (val_loss: {val_loss:.4f})")
     
     # Save final model
     final_path = os.path.join(exp_dir, 'final_model.pt')
-    model.save_checkpoint(final_path, args.epochs - 1, optimizer.state_dict())
+    model.save_checkpoint(final_path, args.epochs - 1, optimizer.state_dict(), val_loss=val_loss)
     
-    # Save training history
+    # Save final training history
     with open(os.path.join(exp_dir, 'training_history.json'), 'w') as f:
         json.dump(history, f, indent=2)
     
-    print("\n" + "="*60)
-    print("Stage 2 Training Complete!")
-    print(f"Best validation loss: {best_val_loss:.4f}")
-    print(f"Checkpoints saved to: {exp_dir}")
+    print("\nTraining complete!")
+    print(f"Best model saved at epoch {best_epoch+1} with val_loss: {best_val_loss:.4f}")
+    print(f"All checkpoints saved to: {exp_dir}")
+    
+    # Evaluate best model with full metrics if not computed during training
+    should_evaluate = not args.compute_metrics_during_training and not args.skip_final_metrics
+    if should_evaluate:
+        # IMPORTANT: Free GPU memory before loading evaluation model
+        print("\nFreeing GPU memory before final evaluation...")
+        del model, optimizer, scheduler
+        torch.cuda.empty_cache()
+        import gc
+        gc.collect()
+        
+        # Give CUDA time to fully free memory
+        import time
+        time.sleep(2)
+        print("GPU memory freed. Loading evaluation model...")
+        
+        best_checkpoint = os.path.join(exp_dir, 'best_model.pt')
+        final_val_loss, final_metrics = evaluate_best_model(best_checkpoint, args, device)
+        
+        # Update history with final metrics
+        history['final_evaluation'] = {
+            'val_loss': final_val_loss,
+            'metrics': final_metrics,
+            'best_epoch': best_epoch + 1
+        }
+        
+        # Re-save history with final metrics
+        with open(os.path.join(exp_dir, 'training_history.json'), 'w') as f:
+            json.dump(history, f, indent=2)
     print("="*60)
 
 
