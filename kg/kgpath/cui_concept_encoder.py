@@ -36,11 +36,13 @@ class CUIConceptEncoder(TitanEncoder):
         # Extract CUI IDs and names
         cui_ids = df['cui:ID'].tolist()
         cui_names = df['name'].tolist()
+        cui_description = df['description'].tolist()
         
         # Encode all concept names
         embeddings_list = []
-        for name in cui_names:
-            embedding = self.encode_text(name, normalize=normalize)
+        for name, description in zip(cui_names, cui_description):
+            caption = f"Whole slide image of a {name}, which is {cui_description}"
+            embedding = self.encode_text(caption, normalize=normalize)
             embeddings_list.append(embedding.cpu().numpy())
         
         # Stack all embeddings

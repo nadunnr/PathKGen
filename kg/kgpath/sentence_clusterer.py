@@ -67,4 +67,5 @@ class SentenceClusterer(TitanEncoder):
             
             closest_sentences.append(sentences[closest_idx])
         
-        return closest_sentences, cluster_labels.tolist(), cluster_centers
+        # return closest_sentences, cluster_labels.tolist(), cluster_centers
+        return closest_sentences
