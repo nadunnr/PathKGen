@@ -34,19 +34,19 @@ def extract_local_subgraph(seed_cui, max_neighbors=500):
     """
     # Start neo4j query
     query = Neo4jQuery(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
-    
+    database = "dataset"
     nodes = set()
     edges = []
     cui_to_name = {}
     
     # Add seed node and get its name
     nodes.add(seed_cui)
-    seed_entity = query.get_entity_by_cui(seed_cui)
+    seed_entity = query.get_entity_by_cui(seed_cui, database=database)
     if seed_entity:
         cui_to_name[seed_cui] = seed_entity['name']
     
     # Get neighbors of the seed CUI
-    neighbors = query.get_neighbors(seed_cui, direction="incoming", limit=max_neighbors)
+    neighbors = query.get_neighbors(seed_cui, direction="incoming", limit=max_neighbors, database=database)
 
     for neighbor in neighbors:
         # Get neighbor CUI
@@ -94,15 +94,21 @@ def build_prompt(nodes, edges, cui_to_name):
     
     return "\n".join(lines)
 
+def get_prompt(seed_cui):
+    """
+    Get the knowledge prompt for a given CUI.
+    """
+    # Step 1: Extract a local subgraph structure (filtered by allowed relations)
+    nodes, edges, cui_to_name = extract_local_subgraph(seed_cui)
+
+    # Step 2: Build and return the prompt
+    return build_prompt(nodes, edges, cui_to_name)
+
 # Main execution
 if __name__ == "__main__":
-    SEED_CUI = "C0007134"   # change to yours
-    
-    # Step 1: Extract a local subgraph structure (filtered by allowed relations)
-    nodes, edges, cui_to_name = extract_local_subgraph(SEED_CUI)
-    
-    # Step 2: Build and print the prompt
-    prompt = build_prompt(nodes, edges, cui_to_name)
+
+    SEED_CUI = "C0678222"
+    prompt = get_prompt(SEED_CUI)
     
     print("\n" + "="*80)
     print(prompt)
