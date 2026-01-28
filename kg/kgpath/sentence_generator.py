@@ -34,19 +34,18 @@ def extract_local_subgraph(seed_cui, max_neighbors=500):
     """
     # Start neo4j query
     query = Neo4jQuery(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
-    database = "dataset"
     nodes = set()
     edges = []
     cui_to_name = {}
     
     # Add seed node and get its name
     nodes.add(seed_cui)
-    seed_entity = query.get_entity_by_cui(seed_cui, database=database)
+    seed_entity = query.get_entity_by_cui(seed_cui)
     if seed_entity:
         cui_to_name[seed_cui] = seed_entity['name']
     
     # Get neighbors of the seed CUI
-    neighbors = query.get_neighbors(seed_cui, direction="incoming", limit=max_neighbors, database=database)
+    neighbors = query.get_neighbors(seed_cui, direction="incoming", limit=max_neighbors)
 
     for neighbor in neighbors:
         # Get neighbor CUI

@@ -1,8 +1,12 @@
 import sys
 from pathlib import Path
+import scispacy
 import spacy
+from pprint import pprint
+from spacy import displacy
 from scispacy.linking import EntityLinker
 from sentence_generator import get_prompt
+from sentence_clusterer import SentenceClusterer
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -11,11 +15,7 @@ def report_to_knowledge_prompt(report_text: str, max_neighbors: int = 500) -> st
     # Step 1: Load scispacy model and entity linker
     print("Loading scispacy model and UMLS entity linker...")
     nlp = spacy.load("en_core_sci_sm")
-    nlp.add_pipe("scispacy_linker", config={
-        "resolve_abbreviations": True, 
-        "linker_name": "umls"
-    })
-    linker = nlp.get_pipe("scispacy_linker")
+    linker = nlp.add_pipe("scispacy_linker", config={"resolve_abbreviations": True, "linker_name": "mesh"})
     doc = nlp(report_text)
     
     # Extract unique CUIs
@@ -26,33 +26,34 @@ def report_to_knowledge_prompt(report_text: str, max_neighbors: int = 500) -> st
             if score >= 0.9:
                 seed_cuis.add(cui)
     
+    print(f"Identified {len(seed_cuis)} CUIs in the report text.")
+    # Filter top-5 CUIs
+    seed_cuis = list(seed_cuis)[:20]
+    
     if not seed_cuis:
         print("Warning: No UMLS entities found in the report text.")
         return ""
+    
+    # Initialize sentence clusterer
+    clusterer = SentenceClusterer()
     
     # Generate sentences for allowed CUIs
     all_sentences = []
     for cui in seed_cuis:
         sentences = get_prompt(cui)
         if sentences:
-            print(f"Generated {len(sentences)} new sentences:\n",  sentences)
-            all_sentences.extend(sentences)    
-    
-    # Merge all sentences into a single paragraph
+            print(f"Generated {len(sentences)} new sentences for CUI {cui}")
+            all_sentences.extend(sentences) 
+        
     if not all_sentences:
         print("Warning: No knowledge sentences were generated.")
         return ""
-    
-    # Remove duplicates while preserving order
-    unique_sentences = []
-    seen = set()
-    for sentence in all_sentences:
-        if sentence not in seen:
-            unique_sentences.append(sentence)
-            seen.add(sentence)
+
+    # Filter by clustering
+    best_sentences = clusterer.cluster_sentences(all_sentences, 10)   
     
     # Join sentences with space to create a paragraph
-    knowledge_paragraph = " ".join(unique_sentences)
+    knowledge_paragraph = "".join(best_sentences)
     return knowledge_paragraph
 
 
