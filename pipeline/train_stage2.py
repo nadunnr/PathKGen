@@ -84,6 +84,12 @@ def parse_args():
     parser.add_argument("--num_workers", type=int, default=4,
                        help="DataLoader workers")
     
+    # Knowledge guidance arguments
+    parser.add_argument("--use_knowledge_guidance", action="store_true",
+                       help="Enable knowledge graph guidance for report generation")
+    parser.add_argument("--max_knowledge_tokens", type=int, default=64,
+                       help="Maximum length for knowledge text tokens")
+    
     # QLoRA arguments
     parser.add_argument("--lora_rank", type=int, default=64,
                        help="LoRA rank")
@@ -137,12 +143,21 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device):
         attention_mask = batch['attention_mask'].to(device)
         labels = batch['labels'].to(device)
         
+        # Extract knowledge tokens if present
+        knowledge_input_ids = batch.get('knowledge_input_ids')
+        knowledge_attention_mask = batch.get('knowledge_attention_mask')
+        if knowledge_input_ids is not None:
+            knowledge_input_ids = knowledge_input_ids.to(device)
+            knowledge_attention_mask = knowledge_attention_mask.to(device)
+        
         # Forward pass
         outputs = model(
             visual_features=visual_features,
             input_ids=input_ids,
             attention_mask=attention_mask,
-            labels=labels
+            labels=labels,
+            knowledge_input_ids=knowledge_input_ids,
+            knowledge_attention_mask=knowledge_attention_mask
         )
         
         loss = outputs['loss']
@@ -210,12 +225,21 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
             single_mask = attention_mask[i:i+1].to(device)
             single_labels = labels[i:i+1].to(device)
             
+            # Extract knowledge tokens if present
+            single_knowledge_ids = None
+            single_knowledge_mask = None
+            if 'knowledge_input_ids' in batch:
+                single_knowledge_ids = batch['knowledge_input_ids'][i:i+1].to(device)
+                single_knowledge_mask = batch['knowledge_attention_mask'][i:i+1].to(device)
+            
             # Forward pass for single sample
             outputs = model(
                 visual_features=single_visual,
                 input_ids=single_input,
                 attention_mask=single_mask,
-                labels=single_labels
+                labels=single_labels,
+                knowledge_input_ids=single_knowledge_ids,
+                knowledge_attention_mask=single_knowledge_mask
             )
             
             sample_loss = outputs['loss'].item()
@@ -294,13 +318,16 @@ def evaluate_best_model(checkpoint_path, args, device):
     val_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
         split=args.val_split,
-        feature_key=args.feature_key
+        feature_key=args.feature_key,
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     # Create data collator
     data_collator = VLMDataCollator(
         tokenizer=tokenizer,
-        max_length=args.max_length
+        max_length=args.max_length,
+        use_knowledge_guidance=args.use_knowledge_guidance,
+        max_knowledge_tokens=args.max_knowledge_tokens
     )
     
     # Create validation dataloader
@@ -334,6 +361,9 @@ def evaluate_best_model(checkpoint_path, args, device):
     if 'lora_state_dict' in checkpoint:
         model.llm.load_state_dict(checkpoint['lora_state_dict'], strict=False)
     
+    # Ensure projection is on CPU after loading (explicit device placement)
+    model.projection = model.projection.to('cpu')
+    
     print(f"Loaded checkpoint from: {checkpoint_path}")
     print(f"Checkpoint epoch: {checkpoint['epoch']+1}")
     print(f"Checkpoint val loss: {checkpoint['val_loss']:.4f}")
@@ -347,7 +377,7 @@ def evaluate_best_model(checkpoint_path, args, device):
     import gc
     gc.collect()
     
-    # Now move model to GPU
+    # Now move model to GPU (the new to() method will properly handle all components)
     print(f"Moving model to {device}...")
     model = model.to(device)
     
@@ -406,13 +436,15 @@ def main():
     train_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
         split=train_split,
-        feature_key=args.feature_key
+        feature_key=args.feature_key,
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     val_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
         split=args.val_split,
-        feature_key=args.feature_key
+        feature_key=args.feature_key,
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     print(f"Train samples: {len(train_dataset)} (split: {args.train_split})")
@@ -421,7 +453,9 @@ def main():
     # Initialize collator
     collator = VLMDataCollator(
         tokenizer=tokenizer,
-        max_length=args.max_length
+        max_length=args.max_length,
+        use_knowledge_guidance=args.use_knowledge_guidance,
+        max_knowledge_tokens=args.max_knowledge_tokens
     )
     
     # Create dataloaders
@@ -520,16 +554,22 @@ def main():
     print("Starting Stage 2 Training")
     print("="*60)
     
+    # Initialize history (only track NLU metrics if computed during training)
     history = {
         'train_loss': [],
-        'val_loss': [],
-        'bleu1': [],
-        'bleu2': [],
-        'bleu3': [],
-        'bleu4': [],
-        'meteor': [],
-        'rouge_l': []
+        'val_loss': []
     }
+    
+    # Only initialize NLU metric lists if computing during training
+    if args.compute_metrics_during_training:
+        history.update({
+            'bleu1': [],
+            'bleu2': [],
+            'bleu3': [],
+            'bleu4': [],
+            'meteor': [],
+            'rouge_l': []
+        })
     
     for epoch in range(start_epoch, args.epochs):
         # Train
@@ -549,9 +589,10 @@ def main():
         )
         history['val_loss'].append(val_loss)
         
-        # Store metrics
-        for key in ['bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor', 'rouge_l']:
-            history[key].append(val_metrics.get(key, 0.0))
+        # Store metrics only if computed during training
+        if args.compute_metrics_during_training:
+            for key in ['bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor', 'rouge_l']:
+                history[key].append(val_metrics.get(key, 0.0))
         
         # Print epoch summary
         print(f"\nEpoch {epoch+1}/{args.epochs}:")

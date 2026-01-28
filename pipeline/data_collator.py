@@ -25,7 +25,9 @@ class VLMDataCollator:
         tokenizer: PreTrainedTokenizer,
         max_length: int = 512,
         padding: str = "longest",
-        prompt_template: str = None  # Will use config default if None
+        prompt_template: str = None,  # Will use config default if None
+        use_knowledge_guidance: bool = False,
+        max_knowledge_tokens: int = 64
     ):
         """
         Args:
@@ -38,6 +40,8 @@ class VLMDataCollator:
         self.max_length = max_length
         self.padding = padding
         self.prompt_template = prompt_template if prompt_template is not None else TRAINING_PROMPT_TEMPLATE
+        self.use_knowledge_guidance = use_knowledge_guidance
+        self.max_knowledge_tokens = max_knowledge_tokens
         
         # Ensure pad token is set
         if self.tokenizer.pad_token is None:
@@ -88,13 +92,30 @@ class VLMDataCollator:
         # Collect metadata
         ids = [item['id'] for item in batch]
         
-        return {
+        # Prepare result dictionary
+        result = {
             'visual_features': visual_features,
             'input_ids': tokenized['input_ids'],
             'attention_mask': tokenized['attention_mask'],
             'labels': labels,
             'ids': ids
         }
+        
+        # Add knowledge tokens if guidance is enabled
+        if self.use_knowledge_guidance:
+            # Extract knowledge texts (without prompt template formatting)
+            knowledge_texts = [item['knowledge_text'] for item in batch]
+            knowledge_tokens = self.tokenizer(
+                knowledge_texts,
+                padding=self.padding,
+                truncation=True,
+                max_length=self.max_knowledge_tokens,
+                return_tensors="pt"
+            )
+            result['knowledge_input_ids'] = knowledge_tokens['input_ids']
+            result['knowledge_attention_mask'] = knowledge_tokens['attention_mask']
+        
+        return result
 
 
 class VLMInferenceCollator:

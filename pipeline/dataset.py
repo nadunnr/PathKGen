@@ -3,9 +3,10 @@ import json
 import h5py
 import torch
 from torch.utils.data import Dataset, DataLoader
+from kgpath.knowledge_extractor import KnowledgeExtractor
 
 class WSI_Report_Dataset(Dataset):
-    def __init__(self, json_path, split = 'train', feature_key='features'):
+    def __init__(self, json_path, split = 'train', feature_key='features', use_knowledge_guidance=False):
         """
         Custom Dataset for loading Whole Slide Image (WSI) features and corresponding reports.
         
@@ -16,10 +17,14 @@ class WSI_Report_Dataset(Dataset):
         """
         self.feature_key = feature_key
         self.split = split
+        self.use_knowledge_guidance = use_knowledge_guidance
 
         # Load dataset information from JSON
         with open(json_path, 'r') as info_file:
             full_dataset = json.load(info_file)
+
+        if self.use_knowledge_guidance:
+            self.knowledge_extractor = KnowledgeExtractor()
         
         #Select the split
         if isinstance(split, str):
@@ -61,11 +66,17 @@ class WSI_Report_Dataset(Dataset):
         slide_id = item.get('id', str(idx))
         organ = item.get('organ', 'unknown')
 
+        if self.use_knowledge_guidance:
+            knowledge_text = self.knowledge_extractor.extract_knowledge(report_text)
+        else:
+            knowledge_text = ""
+
         return {
             'id': slide_id,
             'organ': organ,
             'slide_embedding': slide_embedding,
-            'report': report_text
+            'report': report_text,
+            'knowledge_text': knowledge_text
         }
             
 
@@ -73,11 +84,14 @@ class WSI_Report_Dataset(Dataset):
 if __name__ == "__main__":
     
     # --- Configuration ---
-    json_file = "/home/nadun/wd/vlm_histo/data/curated_breast_dataset.json"
+    json_file = "/home/nadun/wd/datasets/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
 
+    print("="*80)
+    print("TESTING DATASET WITHOUT KNOWLEDGE GUIDANCE")
+    print("="*80)
     try:
         split = ['train','val']
-        dataset = WSI_Report_Dataset(json_file, split=split, feature_key='features')
+        dataset = WSI_Report_Dataset(json_file, split=split, feature_key='features', use_knowledge_guidance=False)
 
         loader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=2)
 
@@ -86,16 +100,53 @@ if __name__ == "__main__":
         for batch in loader:
             slide_embeddings = batch['slide_embedding']
             reports = batch['report']
+            knowledge_texts = batch['knowledge_text']
             ids = batch['id']
 
             print(f"Batch IDs: {ids}")
             print(f"Slide Embeddings Shape: {slide_embeddings.shape}")
             print(f"Number of Reports in Batch: {len(reports)}")
-            print(f"Reports: {reports[0][:50]}...")  # Print first 50 chars of first report
+            print(f"Reports: {reports[0][:50]}...")
+            print(f"Knowledge texts (should be empty): {knowledge_texts}")
             break 
 
     except Exception as e:
         print(f"Error loading dataset: {e}")
+        import traceback
+        traceback.print_exc()
+
+    print("\n" + "="*80)
+    print("TESTING DATASET WITH KNOWLEDGE GUIDANCE")
+    print("="*80)
+    try:
+        split = 'train'
+        dataset_kg = WSI_Report_Dataset(json_file, split=split, feature_key='features', use_knowledge_guidance=True)
+
+        # Use num_workers=0 to avoid multiprocessing issues during testing
+        loader_kg = DataLoader(dataset_kg, batch_size=2, shuffle=True, num_workers=0)
+
+        print(f"Dataset length: {len(dataset_kg)}")
+
+        for batch in loader_kg:
+            slide_embeddings = batch['slide_embedding']
+            reports = batch['report']
+            knowledge_texts = batch['knowledge_text']
+            ids = batch['id']
+
+            print(f"\nBatch IDs: {ids}")
+            print(f"Slide Embeddings Shape: {slide_embeddings.shape}")
+            print(f"Number of Reports in Batch: {len(reports)}")
+            print(f"\nReport sample:\n{reports[0][:200]}...")
+            print(f"\nKnowledge text sample (first 500 chars):\n{knowledge_texts[0][:500] if knowledge_texts[0] else '(empty)'}...")
+            break 
+
+        print("\n✓ Knowledge extraction working correctly!")
+
+    except Exception as e:
+        print(f"Error loading dataset with knowledge guidance: {e}")
+        import traceback
+        traceback.print_exc()
+
 
             
         

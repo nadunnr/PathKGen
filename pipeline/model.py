@@ -3,6 +3,7 @@ import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from typing import Optional, Dict, Tuple
+import os
 import warnings
 from config import (DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS, 
                     DEFAULT_LLM_HIDDEN_DIM, DEFAULT_LLM_PATH, 
@@ -96,10 +97,14 @@ class VisionLanguageModel(nn.Module):
             self.llm = self._load_llm_with_qlora(llm_path)
         else:
             print(f"Loading LLM from {llm_path}")
+            # Determine device_map based on target device
+            # If initializing on CPU (for checkpoint loading), load on CPU
+            # If initializing on CUDA, use device_map='auto' for multi-GPU support
+            llm_device_map = "cpu" if device == "cpu" else "auto"
             self.llm = AutoModelForCausalLM.from_pretrained(
                 llm_path,
                 torch_dtype=torch.bfloat16,
-                device_map="auto",
+                device_map=llm_device_map,
                 trust_remote_code=True
             )
         
@@ -135,6 +140,13 @@ class VisionLanguageModel(nn.Module):
         
     def _load_llm_with_qlora(self, llm_path: str) -> nn.Module:
         """Load LLM with 4-bit quantization and LoRA adapters."""
+        # Clear GPU memory before loading
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
         # BitsAndBytes config for 4-bit quantization
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -148,11 +160,17 @@ class VisionLanguageModel(nn.Module):
             llm_path,
             quantization_config=bnb_config,
             device_map="auto",
-            trust_remote_code=True
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,  # Reduce CPU memory usage
         )
         
+        # Clear cache again before prepare_model_for_kbit_training
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
         # Prepare for k-bit training
-        model = prepare_model_for_kbit_training(model)
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
         
         # LoRA configuration
         lora_config = LoraConfig(
@@ -174,29 +192,46 @@ class VisionLanguageModel(nn.Module):
         return model
     
     def _load_slidechat_weights(self, checkpoint_path: str):
-        """Load SlideChat pathology-specific weights into the LLM."""
+        """Load SlideChat pathology-specific weights into the LLM using memory-mapped file."""
         try:
             print(f"Loading SlideChat weights (this may take a moment)...")
-            # Load to CPU first, but we'll immediately move to GPU
-            state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
             
-            # Clean state dict (remove 'model.' prefix and vision components)
-            # Do this in-place to save RAM
+            # Use mmap_mode='r' to memory-map the file instead of loading it all into RAM
+            # This reads weights directly from disk as needed, avoiding OOM
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
+            
+            print("  Memory-mapping checkpoint file (avoids loading entire file into RAM)...")
+            state_dict = torch.load(
+                checkpoint_path, 
+                map_location=self.device,  # Map directly to target device
+                weights_only=False,
+                mmap=True  # Memory-map the file
+            )
+            
+            # Clean state dict and immediately move to device to minimize CPU RAM usage
             new_state_dict = {}
+            print(f"  Filtering {len(state_dict)} keys for LLM parameters...")
+            
             for key, value in state_dict.items():
                 if key.startswith("model."):
                     clean_key = key.replace("model.", "")
                     # Skip vision-only parameters
                     if "mm_projector" not in clean_key and "slide_encoder" not in clean_key:
-                        # Move to device immediately to free CPU RAM
-                        new_state_dict[clean_key] = value.to(self.device)
+                        # Value is already on target device from map_location
+                        new_state_dict[clean_key] = value
+                        
+                # Free memory every 100 keys
+                if len(new_state_dict) % 100 == 0:
+                    gc.collect()
             
             # Delete original state_dict to free RAM immediately
             del state_dict
-            import gc
             gc.collect()
             torch.cuda.empty_cache()
             
+            print(f"  Loading {len(new_state_dict)} parameters into LLM...")
             # Load into LLM (strict=False to allow missing vision keys)
             if self.use_qlora:
                 # For PEFT models, load into base_model
@@ -216,6 +251,8 @@ class VisionLanguageModel(nn.Module):
         except Exception as e:
             warnings.warn(f"Failed to load SlideChat weights: {e}")
             print("Continuing with base Qwen 2.5 weights...")
+            import traceback
+            traceback.print_exc()
     
     def get_trainable_params(self) -> Dict[str, torch.nn.Parameter]:
         """Get dictionary of trainable parameters for optimizer."""
@@ -236,7 +273,9 @@ class VisionLanguageModel(nn.Module):
         visual_features: torch.Tensor,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None
+        labels: Optional[torch.Tensor] = None,
+        knowledge_input_ids: Optional[torch.Tensor] = None,
+        knowledge_attention_mask: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Forward pass for training.
@@ -258,27 +297,38 @@ class VisionLanguageModel(nn.Module):
         
         # 2. Get text embeddings
         inputs_embeds = self.llm.get_input_embeddings()(input_ids)  # [batch, seq_len, hidden_dim]
+
+        # 3. Concatenate embeddings: visual -> knowledge -> text
+        if knowledge_input_ids is not None:
+            knowledge_embeds = self.llm.get_input_embeddings()(knowledge_input_ids)  # [batch, knowledge_seq_len, hidden_dim]
+            combined_embeds = torch.cat([visual_tokens, knowledge_embeds, inputs_embeds], dim=1)
+            # Free intermediate embeddings
+            del visual_tokens, knowledge_embeds, inputs_embeds
+        else:
+            combined_embeds = torch.cat([visual_tokens, inputs_embeds], dim=1)  # [batch, num_visual_tokens + seq_len, hidden_dim]
+            # Free intermediate embeddings
+            del visual_tokens, inputs_embeds
         
-        # 3. Concatenate visual tokens before text
-        combined_embeds = torch.cat([visual_tokens, inputs_embeds], dim=1)  # [batch, num_visual_tokens + seq_len, hidden_dim]
-        
-        # Free intermediate embeddings (combined_embeds is a new tensor)
-        del visual_tokens, inputs_embeds
-        
-        # 4. Adjust attention mask to include visual tokens
+        # 4. Adjust attention mask toinclude visual and knowledge tokens
         if attention_mask is not None:
             visual_attention = torch.ones(
                 batch_size, self.projection.num_visual_tokens,
                 dtype=attention_mask.dtype,
                 device=attention_mask.device  
             )
-            combined_attention_mask = torch.cat([visual_attention, attention_mask], dim=1)
-            # Clean up intermediate
-            del visual_attention
+    
+            if knowledge_attention_mask is not None:
+                # Concatenate: visual + knowledge + text
+                combined_attention_mask = torch.cat([visual_attention, knowledge_attention_mask, attention_mask], dim=1)
+                del visual_attention
+            else:
+                # Concatenate: visual + text
+                combined_attention_mask = torch.cat([visual_attention, attention_mask], dim=1)
+                del visual_attention
         else:
             combined_attention_mask = None
         
-        # 5. Adjust labels to include visual tokens (set to -100 for ignore)
+        # 5. Adjust labels to include visual and knowledge tokens (set to -100 for ignore)
         if labels is not None:
             visual_labels = torch.full(
                 (batch_size, self.projection.num_visual_tokens),
@@ -286,9 +336,23 @@ class VisionLanguageModel(nn.Module):
                 dtype=labels.dtype,
                 device=labels.device
             )
-            combined_labels = torch.cat([visual_labels, labels], dim=1)
-            # Clean up intermediate
-            del visual_labels
+            
+            if knowledge_input_ids is not None:
+                # Create labels for knowledge tokens (also -100 to ignore)
+                knowledge_seq_len = knowledge_input_ids.shape[1]
+                knowledge_labels = torch.full(
+                    (batch_size, knowledge_seq_len),
+                    -100,
+                    dtype=labels.dtype,
+                    device=labels.device
+                )
+                # Concatenate: visual + knowledge + text
+                combined_labels = torch.cat([visual_labels, knowledge_labels, labels], dim=1)
+                del visual_labels, knowledge_labels
+            else:
+                # Concatenate: visual + text
+                combined_labels = torch.cat([visual_labels, labels], dim=1)
+                del visual_labels
         else:
             combined_labels = None
         
@@ -370,6 +434,31 @@ class VisionLanguageModel(nn.Module):
         
         return generated_text
     
+    def to(self, device):
+        """
+        Override to() method to properly move all model components to target device.
+        
+        This is critical when loading checkpoints on CPU and then moving to CUDA,
+        as the LLM may have device_map='cpu' set.
+        """
+        # Update internal device tracker
+        self.device = device if isinstance(device, str) else str(device)
+        
+        # Move projection layer
+        self.projection = self.projection.to(device)
+        
+        # Move LLM - need to handle device_map models specially
+        # For models loaded with device_map, we need to move them differently
+        if hasattr(self.llm, 'hf_device_map'):
+            # Model was loaded with device_map, need to reload or use accelerate
+            # For now, just move it normally and clear the device_map
+            self.llm.hf_device_map = None
+        
+        # Move LLM to target device
+        self.llm = self.llm.to(device)
+        
+        return self
+    
     def merge_lora_weights(self):
         """
         Merge LoRA adapter weights into the base model.
@@ -398,57 +487,88 @@ class VisionLanguageModel(nn.Module):
         
         return self
     
-    def save_checkpoint(self, save_path: str, epoch: int, optimizer_state: Optional[dict] = None, val_loss: Optional[float] = None):
-        """Save model checkpoint."""
+    def save_checkpoint(self, path: str, epoch: int, optimizer_state: dict = None, val_loss: float = None):
+        """Save model checkpoint with metadata."""
         checkpoint = {
             'epoch': epoch,
             'projection_state_dict': self.projection.state_dict(),
-            'model_config': {
-                'visual_dim': self.projection.projector[0].in_features,
-                'num_visual_tokens': self.projection.num_visual_tokens,
-                'use_qlora': self.use_qlora
-            }
+            'val_loss': val_loss,
         }
-        
-        # Save LLM weights (for QLoRA, only save adapters)
-        if self.use_qlora:
-            checkpoint['lora_state_dict'] = self.llm.state_dict()
-        elif not self.freeze_llm:
-            checkpoint['llm_state_dict'] = self.llm.state_dict()
         
         if optimizer_state is not None:
             checkpoint['optimizer_state_dict'] = optimizer_state
         
-        if val_loss is not None:
-            checkpoint['val_loss'] = val_loss
+        # Create directory if needed
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        torch.save(checkpoint, path)
         
-        torch.save(checkpoint, save_path)
-        print(f"Checkpoint saved to {save_path}")
-    
-    def load_checkpoint(self, checkpoint_path: str, load_optimizer: bool = False):
-        """Load model checkpoint."""
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+    def load_checkpoint(self, path: str, load_optimizer: bool = False):
+        """
+        Load checkpoint and ensure all components are on correct device.
         
-        # Load projection
+        Returns:
+            epoch: The epoch number from checkpoint
+            optimizer_state: Optimizer state dict if load_optimizer=True, else None
+        """
+        print(f"Loading checkpoint from: {path}")
+        
+        # Load checkpoint to current device (not CPU!)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        
+        # Load projection weights
         self.projection.load_state_dict(checkpoint['projection_state_dict'])
-        print(f"✓ Loaded projection weights from {checkpoint_path}")
         
-        # Load LLM/LoRA if present
-        if 'lora_state_dict' in checkpoint and self.use_qlora:
-            # Use strict=False to handle quantization metadata keys
-            missing_keys, unexpected_keys = self.llm.load_state_dict(
-                checkpoint['lora_state_dict'], strict=False
-            )
-            print(f"✓ Loaded LoRA weights")
-            if len(unexpected_keys) > 0:
-                print(f"  Note: {len(unexpected_keys)} unexpected keys (quantization metadata - this is normal)")
-        elif 'llm_state_dict' in checkpoint and not self.freeze_llm:
-            self.llm.load_state_dict(checkpoint['llm_state_dict'], strict=False)
-            print(f"✓ Loaded LLM weights")
+        # CRITICAL: Explicitly ensure projection is on the correct device and dtype
+        self.projection = self.projection.to(self.device)
+        if hasattr(self, 'llm_dtype'):
+            self.projection = self.projection.to(self.llm_dtype)
         
-        optimizer_state = checkpoint.get('optimizer_state_dict') if load_optimizer else None
+        print(f"✓ Checkpoint loaded from epoch {checkpoint['epoch']+1}")
+        if 'val_loss' in checkpoint and checkpoint['val_loss'] is not None:
+            print(f"  Validation loss: {checkpoint['val_loss']:.4f}")
         
-        return checkpoint['epoch'], optimizer_state
+        # Verify device placement
+        sample_param = next(self.projection.parameters())
+        print(f"  Projection device: {sample_param.device}, dtype: {sample_param.dtype}")
+        
+        optimizer_state = None
+        if load_optimizer and 'optimizer_state_dict' in checkpoint:
+            optimizer_state = checkpoint['optimizer_state_dict']
+        
+        epoch = checkpoint['epoch']
+        
+        # Clean up
+        del checkpoint
+        torch.cuda.empty_cache()
+        
+        return epoch, optimizer_state
+    
+    def to(self, device):
+        """
+        Override to() to ensure ALL components are moved to the correct device.
+        
+        IMPORTANT: This must handle:
+        1. LLM (AutoModelForCausalLM)
+        2. Projection layer (nn.Module)
+        3. Any intermediate buffers
+        """
+        # Move base class first
+        super().to(device)
+        
+        # Explicitly move LLM
+        self.llm = self.llm.to(device)
+        
+        # Explicitly move projection layer and all its submodules
+        self.projection = self.projection.to(device)
+        
+        # Ensure projection matches LLM dtype (bfloat16)
+        if hasattr(self, 'llm_dtype'):
+            self.projection = self.projection.to(self.llm_dtype)
+        
+        # Update stored device
+        self.device = device
+        
+        return self
 
 
 if __name__ == "__main__":

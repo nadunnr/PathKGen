@@ -38,6 +38,10 @@ DEFAULT_TEMPERATURE = 0.7
 DEFAULT_TOP_P = 0.9
 DEFAULT_REPETITION_PENALTY = 1.2
 
+# Knowledge guidance settings
+DEFAULT_USE_KNOWLEDGE_GUIDANCE = False
+DEFAULT_MAX_KNOWLEDGE_TOKENS = 64
+
 # ============================================================================
 # PATH CONFIGURATION
 # ============================================================================

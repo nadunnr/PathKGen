@@ -279,17 +279,20 @@ def evaluate_best_model(checkpoint_path, args, device):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
-    # Create validation dataset
+    # Create validation dataset (no knowledge guidance in stage1)
     val_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
         split=args.val_split,
-        feature_key=args.feature_key
+        feature_key=args.feature_key,
+        use_knowledge_guidance=False  # Stage 1 doesn't use knowledge guidance
     )
     
-    # Create data collator
+    # Create data collator (no knowledge guidance in stage1)
     data_collator = VLMDataCollator(
         tokenizer=tokenizer,
-        max_length=args.max_length
+        max_length=args.max_length,
+        use_knowledge_guidance=False,  # Stage 1 doesn't use knowledge guidance
+        max_knowledge_tokens=64  # Not used but provided for consistency
     )
     
     # Create validation dataloader
@@ -308,8 +311,8 @@ def evaluate_best_model(checkpoint_path, args, device):
         visual_dim=args.visual_dim,
         num_visual_tokens=args.num_visual_tokens,
         slidechat_checkpoint=args.slidechat_checkpoint,
-        use_qlora=False,
-        freeze_llm=True,
+        use_qlora=False,  # Stage 1: no QLoRA
+        freeze_llm=True,  # Stage 1: LLM is frozen
         gradient_checkpointing=False,  # Disable for inference
         device='cpu'  # Initialize on CPU first
     )
@@ -318,8 +321,11 @@ def evaluate_best_model(checkpoint_path, args, device):
     print(f"\nLoading checkpoint to CPU: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     
-    # Load projection weights (Stage 1 only trains projection)
+    # Load projection weights
     model.projection.load_state_dict(checkpoint['projection_state_dict'])
+    
+    # Ensure projection is on CPU after loading (explicit device placement)
+    model.projection = model.projection.to('cpu')
     
     print(f"Loaded checkpoint from: {checkpoint_path}")
     print(f"Checkpoint epoch: {checkpoint['epoch']+1}")
@@ -334,7 +340,7 @@ def evaluate_best_model(checkpoint_path, args, device):
     import gc
     gc.collect()
     
-    # Now move model to GPU
+    # Now move model to GPU (the to() method will properly handle all components)
     print(f"Moving model to {device}...")
     model = model.to(device)
     
@@ -480,16 +486,22 @@ def main():
     print("Starting Stage 1 Training")
     print("="*60)
     
+    # Initialize history (only track NLU metrics if computed during training)
     history = {
         'train_loss': [],
-        'val_loss': [],
-        'bleu1': [],
-        'bleu2': [],
-        'bleu3': [],
-        'bleu4': [],
-        'meteor': [],
-        'rouge_l': []
+        'val_loss': []
     }
+    
+    # Only initialize NLU metric lists if computing during training
+    if args.compute_metrics_during_training:
+        history.update({
+            'bleu1': [],
+            'bleu2': [],
+            'bleu3': [],
+            'bleu4': [],
+            'meteor': [],
+            'rouge_l': []
+        })
     
     for epoch in range(start_epoch, args.epochs):
         # Train
@@ -509,9 +521,10 @@ def main():
         )
         history['val_loss'].append(val_loss)
         
-        # Store metrics
-        for key in ['bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor', 'rouge_l']:
-            history[key].append(val_metrics.get(key, 0.0))
+        # Store metrics only if computed during training
+        if args.compute_metrics_during_training:
+            for key in ['bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor', 'rouge_l']:
+                history[key].append(val_metrics.get(key, 0.0))
         
         # Print epoch summary
         print(f"\nEpoch {epoch+1}/{args.epochs}:")
@@ -554,9 +567,9 @@ def main():
     
     # Evaluate best model with full metrics if not computed during training
     should_evaluate = not args.compute_metrics_during_training and not args.skip_final_metrics
-    if should_evaluate:
+    if should_evaluate:  
         # IMPORTANT: Free GPU memory before loading evaluation model
-        print("\nFreeing GPU memory before final evaluation...")
+        print("\nFreeing GPU memory before final NLU evaluation...")
         del model, optimizer, scheduler
         torch.cuda.empty_cache()
         import gc
