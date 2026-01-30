@@ -3,7 +3,6 @@ import json
 import h5py
 import torch
 from torch.utils.data import Dataset, DataLoader
-from kgpath.knowledge_extractor import KnowledgeExtractor
 
 class WSI_Report_Dataset(Dataset):
     def __init__(self, json_path, split = 'train', feature_key='features', use_knowledge_guidance=False):
@@ -22,9 +21,6 @@ class WSI_Report_Dataset(Dataset):
         # Load dataset information from JSON
         with open(json_path, 'r') as info_file:
             full_dataset = json.load(info_file)
-
-        if self.use_knowledge_guidance:
-            self.knowledge_extractor = KnowledgeExtractor()
         
         #Select the split
         if isinstance(split, str):
@@ -55,6 +51,12 @@ class WSI_Report_Dataset(Dataset):
         feature_path = item['feature_path']
         report_text = item['report']
 
+        # Get pre-computed knowledge text if using knowledge guidance
+        if self.use_knowledge_guidance:
+            knowledge_text = item.get("knowledge", "")
+        else:
+            knowledge_text = ""
+
         # Load slide features from H5 file
         if not os.path.exists(feature_path):
             raise FileNotFoundError(f"Feature file not found: {feature_path}")
@@ -65,11 +67,6 @@ class WSI_Report_Dataset(Dataset):
 
         slide_id = item.get('id', str(idx))
         organ = item.get('organ', 'unknown')
-
-        if self.use_knowledge_guidance:
-            knowledge_text = self.knowledge_extractor.extract_knowledge(report_text)
-        else:
-            knowledge_text = ""
 
         return {
             'id': slide_id,
@@ -84,7 +81,7 @@ class WSI_Report_Dataset(Dataset):
 if __name__ == "__main__":
     
     # --- Configuration ---
-    json_file = "/home/nadun/wd/datasets/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
+    json_file = "/home/nadun/wd/datasets/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2_knowledge.json"
 
     print("="*80)
     print("TESTING DATASET WITHOUT KNOWLEDGE GUIDANCE")
