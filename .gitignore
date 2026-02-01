@@ -32,3 +32,4 @@ kg/tmp/
 pipeline/tmp/
 kg/nodes.csv
 kg/relationships.csv
+pipeline/QWEN2.5_7B_README.md
