@@ -37,7 +37,8 @@ from config import (GENERATION_PROMPT, TRAINING_PROMPT_TEMPLATE,
                     DEFAULT_LLM_PATH, DEFAULT_SLIDECHAT_CHECKPOINT,
                     DEFAULT_DATA_JSON, DEFAULT_VISUAL_DIM, 
                     DEFAULT_NUM_VISUAL_TOKENS, DEFAULT_MAX_LENGTH,
-                    DEFAULT_MAX_NEW_TOKENS)
+                    DEFAULT_MAX_NEW_TOKENS,
+                    extract_report_from_labels)
 
 
 def parse_args():
@@ -141,26 +142,24 @@ def validate(model, dataloader, device, tokenizer, args):
             torch.cuda.empty_cache()
             
             # Generate prediction
+            # Get knowledge text if available
+            knowledge_text = None
+            if 'knowledge_texts' in batch:
+                knowledge_text = batch['knowledge_texts'][i]
+            
             pred_text = model.generate(
                 visual_features=single_visual,
-                prompt=GENERATION_PROMPT,
+                prompt=None,  # Let model auto-select based on knowledge_text
+                knowledge_text=knowledge_text,
                 max_new_tokens=args.max_new_tokens,
                 temperature=args.temperature,
                 top_p=args.top_p
             )
             all_predictions.append(pred_text)
             
-            # Decode reference and remove prompt prefix
+            # Extract ground truth report from labels
             label_ids = labels[i][labels[i] != -100]
-            ref_text_full = tokenizer.decode(label_ids, skip_special_tokens=True)
-            
-            # Remove the training prompt from reference for fair comparison
-            prompt_prefix = TRAINING_PROMPT_TEMPLATE.replace("{report}", "")
-            if ref_text_full.startswith(prompt_prefix):
-                ref_text = ref_text_full[len(prompt_prefix):].strip()
-            else:
-                ref_text = ref_text_full.strip()
-            
+            ref_text = extract_report_from_labels(tokenizer, label_ids)
             all_references.append(ref_text)
             
             # Clear cache after each sample

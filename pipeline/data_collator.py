@@ -1,13 +1,18 @@
 """
 Data collator for Vision-Language Model training.
 
-Handles batching of slide features and text reports with proper padding.
+Handles batching of slide features and text prompt_message with proper padding.
 """
 
 import torch
 from typing import Dict, List, Any
 from transformers import PreTrainedTokenizer
-from config import TRAINING_PROMPT_TEMPLATE
+from config import (
+    TRAINING_PROMPT_NO_KNOWLEDGE,
+    TRAINING_PROMPT_WITH_KNOWLEDGE,
+    IMAGE_START_TOKEN,
+    IMAGE_END_TOKEN
+)
 
 
 class VLMDataCollator:
@@ -25,7 +30,6 @@ class VLMDataCollator:
         tokenizer: PreTrainedTokenizer,
         max_length: int = 512,
         padding: str = "longest",
-        prompt_template: str = None,  # Will use config default if None
         use_knowledge_guidance: bool = False,
         max_knowledge_tokens: int = 64
     ):
@@ -34,14 +38,20 @@ class VLMDataCollator:
             tokenizer: HuggingFace tokenizer
             max_length: Maximum sequence length
             padding: Padding strategy ('longest' or 'max_length')
-            prompt_template: Template for formatting reports (uses config default if None)
+            use_knowledge_guidance: Whether to use knowledge-guided prompts
+            max_knowledge_tokens: Maximum tokens for knowledge text
         """
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.padding = padding
-        self.prompt_template = prompt_template if prompt_template is not None else TRAINING_PROMPT_TEMPLATE
         self.use_knowledge_guidance = use_knowledge_guidance
         self.max_knowledge_tokens = max_knowledge_tokens
+        
+        # Select appropriate prompt template based on knowledge guidance
+        if use_knowledge_guidance:
+            self.prompt_template = TRAINING_PROMPT_WITH_KNOWLEDGE
+        else:
+            self.prompt_template = TRAINING_PROMPT_NO_KNOWLEDGE
         
         # Ensure pad token is set
         if self.tokenizer.pad_token is None:
@@ -69,21 +79,27 @@ class VLMDataCollator:
         # Extract slide features
         visual_features = torch.stack([item['slide_embedding'] for item in batch])
         
-        # Format reports with prompt template
-        reports = [
-            self.prompt_template.format(report=item['report'])
-            for item in batch
-        ]
+        # Format prompt_message with prompt template
+        if self.use_knowledge_guidance:
+            prompt_message = [self.prompt_template.format(knowledge=item['knowledge_text'], report=item['report']) for item in batch]
+        else:
+            prompt_message = [self.prompt_template.format(report=item['report']) for item in batch]
         
-        # Tokenize reports
+        # Tokenize prompt_message
         tokenized = self.tokenizer(
-            reports,
+            prompt_message,
             padding=self.padding,
             truncation=True,
             max_length=self.max_length,
             return_tensors="pt"
         )
-        
+
+        # print("tokenized.keys()", tokenized.keys())
+        # print("tokenized.input_ids.shape", tokenized.input_ids.shape)
+        # print("tokenized.attention_mask.shape", tokenized.attention_mask.shape)
+        # print("tokenized.input_ids", tokenized.input_ids)
+        # print("tokenized.attention_mask", tokenized.attention_mask)
+
         # Prepare labels (shift will be handled by the model)
         # Set pad tokens to -100 so they're ignored in loss
         labels = tokenized['input_ids'].clone()
@@ -101,19 +117,10 @@ class VLMDataCollator:
             'ids': ids
         }
         
-        # Add knowledge tokens if guidance is enabled
+        # Include knowledge_text for generation (if using knowledge guidance)
         if self.use_knowledge_guidance:
-            # Extract knowledge texts (without prompt template formatting)
-            knowledge_texts = [item['knowledge_text'] for item in batch]
-            knowledge_tokens = self.tokenizer(
-                knowledge_texts,
-                padding=self.padding,
-                truncation=True,
-                max_length=self.max_knowledge_tokens,
-                return_tensors="pt"
-            )
-            result['knowledge_input_ids'] = knowledge_tokens['input_ids']
-            result['knowledge_attention_mask'] = knowledge_tokens['attention_mask']
+            knowledge_texts = [item.get('knowledge_text', '') for item in batch]
+            result['knowledge_texts'] = knowledge_texts
         
         return result
 
@@ -149,7 +156,6 @@ class VLMInferenceCollator:
             'organs': organs,
             'prompt': self.prompt
         }
-
 
 if __name__ == "__main__":
     from transformers import AutoTokenizer

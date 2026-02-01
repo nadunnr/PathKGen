@@ -28,7 +28,8 @@ from config import (GENERATION_PROMPT, TRAINING_PROMPT_TEMPLATE,
                     DEFAULT_LLM_PATH, DEFAULT_SLIDECHAT_CHECKPOINT,
                     DEFAULT_DATA_JSON, DEFAULT_STAGE1_OUTPUT,
                     DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS,
-                    DEFAULT_MAX_LENGTH, DEFAULT_MAX_NEW_TOKENS)
+                    DEFAULT_MAX_LENGTH, DEFAULT_MAX_NEW_TOKENS,
+                    extract_report_from_labels)
 
 
 def parse_args():
@@ -78,6 +79,12 @@ def parse_args():
                        help="Gradient accumulation steps")
     parser.add_argument("--num_workers", type=int, default=4,
                        help="DataLoader workers")
+    
+    # Knowledge guidance arguments
+    parser.add_argument("--use_knowledge_guidance", action="store_true",
+                       help="Enable knowledge graph guidance for report generation (recommended if Stage 2 will use it)")
+    parser.add_argument("--max_knowledge_tokens", type=int, default=64,
+                       help="Maximum length for knowledge text tokens")
     
     # Checkpointing
     parser.add_argument("--output_dir", type=str, 
@@ -220,27 +227,24 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
                 if hasattr(model.llm, 'gradient_checkpointing_disable'):
                     model.llm.gradient_checkpointing_disable()
                 
+                # Get knowledge text if available
+                knowledge_text = None
+                if 'knowledge_texts' in batch and args.use_knowledge_guidance:
+                    knowledge_text = batch['knowledge_texts'][i]
+                
                 pred_text = model.generate(
                     visual_features=single_visual,
-                    prompt=GENERATION_PROMPT,
+                    prompt=None,  # Let model auto-select based on knowledge_text
+                    knowledge_text=knowledge_text,
                     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
                     temperature=0.7,
                     top_p=0.9
                 )
                 all_predictions.append(pred_text)
                 
-                # Decode reference and remove prompt prefix
+                # Extract ground truth report from labels
                 label_ids = labels[i][labels[i] != -100]
-                ref_text_full = tokenizer.decode(label_ids, skip_special_tokens=True)
-                
-                # Remove the training prompt from reference for fair comparison
-                # Extract just the prompt prefix from the template
-                prompt_prefix = TRAINING_PROMPT_TEMPLATE.replace("{report}", "")
-                if ref_text_full.startswith(prompt_prefix):
-                    ref_text = ref_text_full[len(prompt_prefix):].strip()
-                else:
-                    ref_text = ref_text_full.strip()
-                
+                ref_text = extract_report_from_labels(tokenizer, label_ids)
                 all_references.append(ref_text)
                 
                 # Re-enable gradient checkpointing if needed
@@ -279,20 +283,25 @@ def evaluate_best_model(checkpoint_path, args, device):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
-    # Create validation dataset (no knowledge guidance in stage1)
+    # CRITICAL: Add image marker tokens (must match model.py)
+    from config import IMAGE_START_TOKEN, IMAGE_END_TOKEN
+    special_tokens_dict = {'additional_special_tokens': [IMAGE_START_TOKEN, IMAGE_END_TOKEN]}
+    tokenizer.add_special_tokens(special_tokens_dict)
+    
+    # Create validation dataset
     val_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
         split=args.val_split,
         feature_key=args.feature_key,
-        use_knowledge_guidance=False  # Stage 1 doesn't use knowledge guidance
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
-    # Create data collator (no knowledge guidance in stage1)
+    # Create data collator
     data_collator = VLMDataCollator(
         tokenizer=tokenizer,
         max_length=args.max_length,
-        use_knowledge_guidance=False,  # Stage 1 doesn't use knowledge guidance
-        max_knowledge_tokens=64  # Not used but provided for consistency
+        use_knowledge_guidance=args.use_knowledge_guidance,
+        max_knowledge_tokens=args.max_knowledge_tokens
     )
     
     # Create validation dataloader
@@ -390,6 +399,12 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
+    # CRITICAL: Add image marker tokens as special tokens (must match model.py)
+    from config import IMAGE_START_TOKEN, IMAGE_END_TOKEN
+    special_tokens_dict = {'additional_special_tokens': [IMAGE_START_TOKEN, IMAGE_END_TOKEN]}
+    num_added_tokens = tokenizer.add_special_tokens(special_tokens_dict)
+    print(f"Added {num_added_tokens} special tokens to tokenizer: {IMAGE_START_TOKEN}, {IMAGE_END_TOKEN}")
+    
     # Initialize datasets
     print("Loading datasets...")
     
@@ -399,13 +414,15 @@ def main():
     train_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
         split=train_split,
-        feature_key=args.feature_key
+        feature_key=args.feature_key,
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     val_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
         split=args.val_split,
-        feature_key=args.feature_key
+        feature_key=args.feature_key,
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     print(f"Train samples: {len(train_dataset)} (split: {args.train_split})")
@@ -414,7 +431,9 @@ def main():
     # Initialize collator
     collator = VLMDataCollator(
         tokenizer=tokenizer,
-        max_length=args.max_length
+        max_length=args.max_length,
+        use_knowledge_guidance=args.use_knowledge_guidance,
+        max_knowledge_tokens=args.max_knowledge_tokens
     )
     
     # Create dataloaders
@@ -593,6 +612,7 @@ def main():
         # Re-save history with final metrics
         with open(os.path.join(exp_dir, 'training_history.json'), 'w') as f:
             json.dump(history, f, indent=2)
+            
     print("="*60)
 
 

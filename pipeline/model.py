@@ -7,7 +7,7 @@ import os
 import warnings
 from config import (DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS, 
                     DEFAULT_LLM_HIDDEN_DIM, DEFAULT_LLM_PATH, 
-                    DEFAULT_SLIDECHAT_CHECKPOINT)
+                    DEFAULT_SLIDECHAT_CHECKPOINT, IMAGE_START_TOKEN, IMAGE_END_TOKEN)
 
 
 class ProjectionLayer(nn.Module):
@@ -82,6 +82,15 @@ class VisionLanguageModel(nn.Module):
         self.tokenizer = AutoTokenizer.from_pretrained(llm_path, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        
+        # Add image marker tokens as special tokens
+        special_tokens_dict = {'additional_special_tokens': [IMAGE_START_TOKEN, IMAGE_END_TOKEN]}
+        num_added_tokens = self.tokenizer.add_special_tokens(special_tokens_dict)
+        print(f"Added {num_added_tokens} special tokens: {IMAGE_START_TOKEN}, {IMAGE_END_TOKEN}")
+        
+        # Store token IDs for later use
+        self.image_start_token_id = self.tokenizer.convert_tokens_to_ids(IMAGE_START_TOKEN)
+        self.image_end_token_id = self.tokenizer.convert_tokens_to_ids(IMAGE_END_TOKEN)
             
         # 2. Initialize projection layer
         llm_hidden_dim = 3584  # Qwen 2.5 7B
@@ -172,16 +181,16 @@ class VisionLanguageModel(nn.Module):
         # Prepare for k-bit training
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
         
-        # LoRA configuration
+        # LoRA configuration (optimized for fast convergence without knowledge)
         lora_config = LoraConfig(
-            r=64,  # Rank
-            lora_alpha=128,
+            r=128,  # Rank (higher = more capacity)
+            lora_alpha=256,  # Scaling factor (2x rank = aggressive updates for faster learning)
             target_modules=[
                 "q_proj", "k_proj", "v_proj", "o_proj",
                 "gate_proj", "up_proj", "down_proj"
             ],
-            lora_dropout=0.05,
-            bias="none",
+            lora_dropout=0.02,  # Reduced from 0.05 (less regularization for faster learning)
+            bias="all",  # Enable bias adaptation (was "none", adds capacity)
             task_type="CAUSAL_LM"
         )
         
@@ -203,9 +212,10 @@ class VisionLanguageModel(nn.Module):
             torch.cuda.empty_cache()
             
             print("  Memory-mapping checkpoint file (avoids loading entire file into RAM)...")
+            # CRITICAL: Load to CPU first to avoid OOM (Qwen already on GPU)
             state_dict = torch.load(
                 checkpoint_path, 
-                map_location=self.device,  # Map directly to target device
+                map_location='cpu',  # Load to CPU first, then selectively move to GPU
                 weights_only=False,
                 mmap=True  # Memory-map the file
             )
@@ -278,11 +288,11 @@ class VisionLanguageModel(nn.Module):
         knowledge_attention_mask: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """
-        Forward pass for training.
+        Forward pass for training with image marker token injection.
         
         Args:
             visual_features: [batch, 768] slide embeddings
-            input_ids: [batch, seq_len] tokenized text
+            input_ids: [batch, seq_len] tokenized text (includes <image_start> and <image_end>)
             attention_mask: [batch, seq_len] attention mask
             labels: [batch, seq_len] labels for language modeling loss
             
@@ -297,66 +307,46 @@ class VisionLanguageModel(nn.Module):
         
         # 2. Get text embeddings
         inputs_embeds = self.llm.get_input_embeddings()(input_ids)  # [batch, seq_len, hidden_dim]
-
-        # 3. Concatenate embeddings: visual -> knowledge -> text
-        if knowledge_input_ids is not None:
-            knowledge_embeds = self.llm.get_input_embeddings()(knowledge_input_ids)  # [batch, knowledge_seq_len, hidden_dim]
-            combined_embeds = torch.cat([visual_tokens, knowledge_embeds, inputs_embeds], dim=1)
-            # Free intermediate embeddings
-            del visual_tokens, knowledge_embeds, inputs_embeds
-        else:
-            combined_embeds = torch.cat([visual_tokens, inputs_embeds], dim=1)  # [batch, num_visual_tokens + seq_len, hidden_dim]
-            # Free intermediate embeddings
-            del visual_tokens, inputs_embeds
         
-        # 4. Adjust attention mask toinclude visual and knowledge tokens
+        # 3. Find image marker positions (assume same across batch since same template)
+        sample_input_ids = input_ids[0]
+        marker_start_positions = (sample_input_ids == self.image_start_token_id).nonzero(as_tuple=True)[0]
+        marker_end_positions = (sample_input_ids == self.image_end_token_id).nonzero(as_tuple=True)[0]
+        
+        if len(marker_start_positions) == 0 or len(marker_end_positions) == 0:
+            raise ValueError("Image markers <image_start> and <image_end> not found in input_ids")
+        
+        visual_start_idx = marker_start_positions[0].item()
+        visual_end_idx = marker_end_positions[0].item()
+        
+        # Split embeddings: [before_markers] + [visual_tokens] + [after_markers]
+        before_embeds = inputs_embeds[:, :visual_start_idx+1, :]  # Everything before with <image_start>
+        after_embeds = inputs_embeds[:, visual_end_idx:, :]   # Everything after with <image_end>
+        
+        # Concatenate: before + visual + after
+        combined_embeds = torch.cat([before_embeds, visual_tokens, after_embeds], dim=1)
+        
+        # 6. VECTORIZED: Handle attention mask
         if attention_mask is not None:
-            visual_attention = torch.ones(
-                batch_size, self.projection.num_visual_tokens,
-                dtype=attention_mask.dtype,
-                device=attention_mask.device  
-            )
-    
-            if knowledge_attention_mask is not None:
-                # Concatenate: visual + knowledge + text
-                combined_attention_mask = torch.cat([visual_attention, knowledge_attention_mask, attention_mask], dim=1)
-                del visual_attention
-            else:
-                # Concatenate: visual + text
-                combined_attention_mask = torch.cat([visual_attention, attention_mask], dim=1)
-                del visual_attention
+            before_attn = attention_mask[:, :visual_start_idx]
+            after_attn = attention_mask[:, visual_end_idx+1:]
+            # Attention for: start_marker (1) + visual_tokens (64) + end_marker (1)
+            marker_visual_attn = torch.ones(batch_size, 1 + self.projection.num_visual_tokens + 1, dtype=attention_mask.dtype, device=attention_mask.device)
+            combined_attention_mask = torch.cat([before_attn, marker_visual_attn, after_attn], dim=1)
         else:
             combined_attention_mask = None
         
-        # 5. Adjust labels to include visual and knowledge tokens (set to -100 for ignore)
+        # 7. VECTORIZED: Handle labels
         if labels is not None:
-            visual_labels = torch.full(
-                (batch_size, self.projection.num_visual_tokens),
-                -100,
-                dtype=labels.dtype,
-                device=labels.device
-            )
-            
-            if knowledge_input_ids is not None:
-                # Create labels for knowledge tokens (also -100 to ignore)
-                knowledge_seq_len = knowledge_input_ids.shape[1]
-                knowledge_labels = torch.full(
-                    (batch_size, knowledge_seq_len),
-                    -100,
-                    dtype=labels.dtype,
-                    device=labels.device
-                )
-                # Concatenate: visual + knowledge + text
-                combined_labels = torch.cat([visual_labels, knowledge_labels, labels], dim=1)
-                del visual_labels, knowledge_labels
-            else:
-                # Concatenate: visual + text
-                combined_labels = torch.cat([visual_labels, labels], dim=1)
-                del visual_labels
+            before_labels = labels[:, :visual_start_idx]
+            after_labels = labels[:, visual_end_idx+1:]
+            # Labels for: start_marker (1) + visual_tokens (64) + end_marker (1) = all -100 (ignore)
+            marker_visual_labels = torch.full((batch_size, 1 + self.projection.num_visual_tokens + 1), -100, dtype=labels.dtype, device=labels.device)
+            combined_labels = torch.cat([before_labels, marker_visual_labels, after_labels], dim=1)
         else:
             combined_labels = None
         
-        # 6. Forward through LLM
+        # 8. Forward through LLM
         outputs = self.llm(
             inputs_embeds=combined_embeds,
             attention_mask=combined_attention_mask,
@@ -373,18 +363,20 @@ class VisionLanguageModel(nn.Module):
     def generate(
         self,
         visual_features: torch.Tensor,
-        prompt: str = "Provide a concise single-paragraph pathology diagnosis:",
+        prompt: str = None,
+        knowledge_text: str = None,
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.9,
         repetition_penalty: float = 1.2
     ) -> str:
         """
-        Generate report for a single WSI slide.
+        Generate report for a single WSI slide with image marker tokens.
         
         Args:
             visual_features: [1, 768] or [768] slide embedding
-            prompt: Text prompt to prepend
+            prompt: Text prompt (if None, uses default from config)
+            knowledge_text: Optional knowledge context
             max_new_tokens: Maximum tokens to generate
             temperature: Sampling temperature
             top_p: Nucleus sampling parameter
@@ -393,25 +385,49 @@ class VisionLanguageModel(nn.Module):
         Returns:
             Generated report text
         """
+        from config import GENERATION_PROMPT_NO_KNOWLEDGE, GENERATION_PROMPT_WITH_KNOWLEDGE
+        
         self.eval()
         
         # Ensure batch dimension
         if visual_features.dim() == 1:
             visual_features = visual_features.unsqueeze(0)
         
+        # Select appropriate prompt if not provided
+        if prompt is None:
+            if knowledge_text is not None:
+                prompt = GENERATION_PROMPT_WITH_KNOWLEDGE.format(knowledge=knowledge_text)
+            else:
+                prompt = GENERATION_PROMPT_NO_KNOWLEDGE
+        
         # Project visual features (ensure dtype matches)
         visual_features = visual_features.to(self.device).to(self.llm_dtype)
-        visual_tokens = self.projection(visual_features)
+        visual_tokens = self.projection(visual_features)  # [1, num_visual_tokens, hidden_dim]
         
         # Tokenize prompt
-        prompt_ids = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
+        prompt_ids = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
         input_ids = prompt_ids.input_ids.to(self.device)
         
         # Get prompt embeddings
-        prompt_embeds = self.llm.get_input_embeddings()(input_ids)
+        prompt_embeds = self.llm.get_input_embeddings()(input_ids)  # [1, seq_len, hidden_dim]
         
-        # Combine visual tokens + prompt
-        combined_embeds = torch.cat([visual_tokens, prompt_embeds], dim=1)
+        # Find image marker positions and inject visual tokens (KEEP the markers)
+        image_start_pos = (input_ids[0] == self.image_start_token_id).nonzero(as_tuple=True)[0]
+        image_end_pos = (input_ids[0] == self.image_end_token_id).nonzero(as_tuple=True)[0]
+        
+        if len(image_start_pos) > 0 and len(image_end_pos) > 0:
+            start_idx = image_start_pos[0].item()
+            end_idx = image_end_pos[0].item()
+            
+            # Split: [before_markers] + [visual_tokens] + [after_markers]
+            before_embeds = prompt_embeds[0, :start_idx+1]
+            after_embeds = prompt_embeds[0, end_idx:]
+            
+            # Concatenate
+            combined_embeds = torch.cat([before_embeds.unsqueeze(0), visual_tokens, after_embeds.unsqueeze(0)], dim=1)
+        else:
+            # Fallback: prepend visual tokens if no markers found
+            combined_embeds = torch.cat([visual_tokens, prompt_embeds], dim=1)
         
         # Generate
         outputs = self.llm.generate(
@@ -425,12 +441,15 @@ class VisionLanguageModel(nn.Module):
             pad_token_id=self.tokenizer.pad_token_id
         )
         
-        # Decode (skip visual tokens in output)
+        # Decode (skip special tokens)
         generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         
-        # Remove prompt from output
-        if generated_text.startswith(prompt):
-            generated_text = generated_text[len(prompt):].strip()
+        # Clean up the output - remove the prompt part
+        # The model might include the system/user parts, we only want the assistant response
+        if "<|im_start|>assistant" in generated_text:
+            generated_text = generated_text.split("<|im_start|>assistant")[-1]
+        
+        generated_text = generated_text.strip()
         
         return generated_text
     
@@ -459,34 +478,6 @@ class VisionLanguageModel(nn.Module):
         
         return self
     
-    def merge_lora_weights(self):
-        """
-        Merge LoRA adapter weights into the base model.
-        
-        Converts a QLoRA model into a regular full-precision model by merging 
-        the low-rank adaptation weights back into the base weights.
-        After merging, the model can be saved/loaded without PEFT/QLoRA.
-        
-        Returns:
-            VisionLanguageModel: Self (for chaining)
-        """
-        if not self.use_qlora:
-            print("Model is not using QLoRA, nothing to merge")
-            return self
-        
-        print("Merging LoRA weights into base model...")
-        
-        # Merge and unload LoRA weights
-        self.llm = self.llm.merge_and_unload()
-        
-        # Update flag
-        self.use_qlora = False
-        
-        print("✓ LoRA weights merged successfully")
-        print("  Model is now a regular full-precision model")
-        
-        return self
-    
     def save_checkpoint(self, path: str, epoch: int, optimizer_state: dict = None, val_loss: float = None):
         """Save model checkpoint with metadata."""
         checkpoint = {
@@ -494,6 +485,10 @@ class VisionLanguageModel(nn.Module):
             'projection_state_dict': self.projection.state_dict(),
             'val_loss': val_loss,
         }
+        
+        # CRITICAL: Save LoRA weights for Stage 2 (QLoRA) models
+        if self.use_qlora:
+            checkpoint['lora_state_dict'] = self.llm.state_dict()
         
         if optimizer_state is not None:
             checkpoint['optimizer_state_dict'] = optimizer_state
@@ -517,6 +512,12 @@ class VisionLanguageModel(nn.Module):
         
         # Load projection weights
         self.projection.load_state_dict(checkpoint['projection_state_dict'])
+        
+        # Load LoRA weights if present (Stage 2 models)
+        if 'lora_state_dict' in checkpoint and self.use_qlora:
+            print("  Loading LoRA adapter weights...")
+            self.llm.load_state_dict(checkpoint['lora_state_dict'], strict=False)
+            print("  ✓ LoRA weights loaded")
         
         # CRITICAL: Explicitly ensure projection is on the correct device and dtype
         self.projection = self.projection.to(self.device)
