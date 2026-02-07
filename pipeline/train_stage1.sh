@@ -12,6 +12,8 @@ lr=1e-4
 output_dir=checkpoints/stage1
 save_every=2
 
+parent_dir="wd/vlm_histo/checkpoints/stage2/2026-02-01_13-09_vt64_ml512_e5_bs2 wd/vlm_histo/pipeline"
+
 echo "Starting Stage 1 Training with Memory Optimizations"
 echo "===================================================="
 echo ""
@@ -36,7 +38,7 @@ python train_stage1.py \
     --val_split $val_split \
     --gradient_checkpointing \
     --lr $lr \
-    --output_dir $output_dir \
+    --output_dir "$parent_dir/$output_dir" \
     --save_every $save_every
 
 echo ""

@@ -7,6 +7,8 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 echo "Starting Stage 2 Training"
 echo "===================================================="
 
+parent_dir="wd/vlm_histo/checkpoints/stage2/2026-02-01_13-09_vt64_ml512_e5_bs2 wd/vlm_histo/pipeline"
+
 python train_stage2.py \
     --stage1_checkpoint /home/nadun/wd/vlm_histo/pipeline/checkpoints/stage1/2026-01-31_08-18_vt64_ml512_e20_bs2/best_model.pt \
     --epochs 5\
@@ -20,7 +22,7 @@ python train_stage2.py \
     --gradient_checkpointing \
     # --use_knowledge_guidance \
     --val_batch_size 1 \
-    --output_dir checkpoints/stage2
+    --output_dir "$parent_dir/checkpoints/stage2/"
 
 echo ""
 echo "Training complete!"

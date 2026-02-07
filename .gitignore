@@ -33,3 +33,9 @@ pipeline/tmp/
 kg/nodes.csv
 kg/relationships.csv
 pipeline/QWEN2.5_7B_README.md
+pipeline/check_h5.py
+pipeline/debug_config.py
+pipeline/feature.py
+pipeline/test_titan_fresh.py
+pipeline/test_titan_output.py
+pipeline/test_titan.py
