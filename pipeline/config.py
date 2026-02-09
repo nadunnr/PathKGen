@@ -13,29 +13,70 @@ Change the prompt here once, and it updates everywhere.
 IMAGE_START_TOKEN = "<image_start>"
 IMAGE_END_TOKEN = "<image_end>"
 
-# Training prompt templates (include {report} placeholder)
+# ============================================================================
+# PROMPT TEMPLATES - HISTGEN FORMAT (Legacy)
+# ============================================================================
 
-# Without knowledge guidance
+# Training prompt without knowledge guidance (HistGen format)
 TRAINING_PROMPT_NO_KNOWLEDGE = """<|im_start|>system
-You are an expert pathology AI assistant specialized in analyzing whole slide images (WSI) from histopathology specimens. You generate accurate, concise diagnostic reports based on visual analysis.<|im_end|>
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
-Analyze the whole slide histopathology image shown above and provide a concise single-paragraph pathology diagnosis.<|im_end|>
+Please analyze this whole slide image and provide a detailed diagnostic report describing the key histopathological features and diagnosis.<|im_end|>
 <|im_start|>assistant
 {report}<|im_end|>"""
 
-# With knowledge guidance (includes {knowledge} placeholder)
+# Training prompt with knowledge guidance (HistGen format)
 TRAINING_PROMPT_WITH_KNOWLEDGE = """<|im_start|>system
-You are an expert pathology AI assistant specialized in analyzing whole slide images (WSI) from histopathology specimens. You integrate medical knowledge with visual analysis to generate accurate, concise diagnostic reports.<|im_end|>
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.
+
+Relevant medical knowledge from UMLS knowledge graph:
+{knowledge}<|im_end|>
 <|im_start|>user
 <image_start><image_end>
-
-Medical Knowledge Context:
-{knowledge}
-
-Using the whole slide histopathology image and the medical knowledge provided, generate a concise single-paragraph pathology diagnosis.<|im_end|>
+Please analyze this whole slide image and provide a detailed diagnostic report describing the key histopathological features and diagnosis.<|im_end|>
 <|im_start|>assistant
 {report}<|im_end|>"""
+
+# ============================================================================
+# PROMPT TEMPLATES - WSI-BENCH FORMAT (Recommended)
+# ============================================================================
+
+# WSI-Bench format - uses dataset's question field
+TRAINING_PROMPT_WSI_BENCH = """<|im_start|>system
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
+<|im_start|>user
+<image_start><image_end>
+{question}<|im_end|>
+<|im_start|>assistant
+{answer}<|im_end|>"""
+
+# WSI-Bench with knowledge guidance
+TRAINING_PROMPT_WSI_BENCH_KNOWLEDGE = """<|im_start|>system
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.
+
+Relevant medical knowledge from UMLS knowledge graph:
+{knowledge}<|im_end|>
+<|im_start|>user
+<image_start><image_end>
+{question}<|im_end|>
+<|im_start|>assistant
+{answer}<|im_end|>"""
+
+# ============================================================================
+# DATASET PATHS
+# ============================================================================
+
+# WSI-Bench dataset paths (pre-split into train/test)
+WSI_BENCH_TRAIN = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-temp_Report_split0.1_train.json"
+WSI_BENCH_TEST = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-temp_Report_split0.1_test.json"
+
+# HistGen dataset path (contains splits internally)
+HISTGEN_DATASET = "/home/nadun/wd/datasets/WSIBench/processed/histgen_dataset.json"  # Example path
+
+# ============================================================================
+# INFERENCE/GENERATION PROMPTS
+# ============================================================================
 
 # Generation/Inference prompts (no {report} placeholder)
 
@@ -119,9 +160,13 @@ def extract_report_from_labels(tokenizer, label_ids):
 # ============================================================================
 
 # Visual embedding settings
-DEFAULT_VISUAL_DIM = 768  # TITAN encoder output dimension
-DEFAULT_NUM_VISUAL_TOKENS = 64  # Number of visual tokens to project to
+DEFAULT_NUM_VISUAL_TOKENS = 128  # Default number of visual tokens
+DEFAULT_VISUAL_DIM = 768  # TITAN encoder feature dimension per token
 DEFAULT_LLM_HIDDEN_DIM = 3584  # Qwen 2.5 7B hidden dimension
+
+# NOTE: Number of visual tokens is now DYNAMIC based on encoder output
+# Typical values: 128 (TITAN), 256, 576 (Gigapath)
+# Determined automatically from feature file shape [num_tokens, 768]
 
 # ============================================================================
 # TRAINING CONFIGURATION

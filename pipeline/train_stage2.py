@@ -41,13 +41,20 @@ def parse_args():
     # Data arguments
     parser.add_argument("--data_json", type=str, 
                        default=DEFAULT_DATA_JSON,
-                       help="Path to dataset JSON")
-    parser.add_argument("--train_split", type=str, default="train",
-                       help="Split(s) to use for training. Can be single split 'train' or comma-separated 'train,val'")
+                       help="Path to dataset JSON (HistGen format)")
+    parser.add_argument("--train_json", type=str, default=None,
+                       help="Path to training JSON (WSI-Bench format)")
+    parser.add_argument("--test_json", type=str, default=None,
+                       help="Path to test JSON (WSI-Bench format)")
+    parser.add_argument("--dataset_format", type=str, default="histgen",
+                       choices=["histgen", "wsi-bench"],
+                       help="Dataset format: 'histgen' (nested dict with splits) or 'wsi-bench' (flat list with questions)")
+    parser.add_argument("--train_split", type=str, default="train,val",
+                       help="Split(s) to use for training (HistGen only). Can be 'train' or 'train,val'")
     parser.add_argument("--val_split", type=str, default="test",
-                       help="Split to use for validation. Single split name like 'test'")
-    parser.add_argument("--feature_key", type=str, default="features",
-                       help="Key in H5 files for slide features")
+                       help="Split to use for validation (HistGen only)")
+    parser.add_argument("--feature_key", type=str, default="tokens",
+                       help="Key in H5 files for slide features (use 'tokens' for spatial features)")
     
     # Model arguments
     parser.add_argument("--llm_path", type=str,
@@ -78,8 +85,8 @@ def parse_args():
                        help="Weight decay")
     parser.add_argument("--max_length", type=int, default=DEFAULT_MAX_LENGTH,
                        help="Maximum sequence length")
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=4,
-                       help="Gradient accumulation steps (increase for smaller batch size)")
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=16,
+                       help="Gradient accumulation steps (effective batch = batch_size * accum_steps)")
     parser.add_argument("--gradient_checkpointing", action="store_true",
                        help="Enable gradient checkpointing to save memory")
     parser.add_argument("--num_workers", type=int, default=4,
@@ -91,11 +98,11 @@ def parse_args():
     parser.add_argument("--max_knowledge_tokens", type=int, default=64,
                        help="Maximum length for knowledge text tokens")
     
-    # QLoRA arguments
-    parser.add_argument("--lora_rank", type=int, default=64,
-                       help="LoRA rank")
-    parser.add_argument("--lora_alpha", type=int, default=128,
-                       help="LoRA alpha")
+    # QLoRA arguments (match WSI-LLaVA configuration)
+    parser.add_argument("--lora_rank", type=int, default=128,
+                       help="LoRA rank (WSI-LLaVA uses 128)")
+    parser.add_argument("--lora_alpha", type=int, default=256,
+                       help="LoRA alpha (WSI-LLaVA uses 256)")
     
     # Checkpointing
     parser.add_argument("--output_dir", type=str, 
@@ -105,6 +112,14 @@ def parse_args():
                        help="Save checkpoint every N epochs")
     parser.add_argument("--resume_from", type=str, default=None,
                        help="Resume training from Stage 2 checkpoint")
+    
+    # Early stopping
+    parser.add_argument("--early_stopping", action="store_true",
+                       help="Enable early stopping based on validation loss")
+    parser.add_argument("--patience", type=int, default=3,
+                       help="Number of epochs with no improvement before stopping (if early_stopping enabled)")
+    parser.add_argument("--min_delta", type=float, default=0.001,
+                       help="Minimum change in validation loss to qualify as improvement")
     
     # Misc
     parser.add_argument("--compute_metrics_during_training", action="store_true",
@@ -317,17 +332,27 @@ def evaluate_best_model(checkpoint_path, args, device):
     special_tokens_dict = {'additional_special_tokens': [IMAGE_START_TOKEN, IMAGE_END_TOKEN]}
     tokenizer.add_special_tokens(special_tokens_dict)
     
-    # Create validation dataset
+    # Create validation dataset with correct format
+    # Use same logic as main training to determine paths and format
+    if args.dataset_format == 'wsi-bench':
+        val_path = args.test_json if args.test_json else args.data_json
+        val_split = None
+    else:
+        val_path = args.data_json
+        val_split = args.val_split
+    
     val_dataset = WSI_Report_Dataset(
-        json_path=args.data_json,
-        split=args.val_split,
+        json_path=val_path,
+        dataset_format=args.dataset_format,
+        split=val_split,
         feature_key=args.feature_key,
         use_knowledge_guidance=args.use_knowledge_guidance
     )
     
-    # Create data collator
+    # Create data collator with dataset format
     data_collator = VLMDataCollator(
         tokenizer=tokenizer,
+        dataset_format=args.dataset_format,
         max_length=args.max_length,
         use_knowledge_guidance=args.use_knowledge_guidance,
         max_knowledge_tokens=args.max_knowledge_tokens
@@ -439,29 +464,50 @@ def main():
     # Initialize datasets
     print("Loading datasets...")
     
-    # Parse train split (can be single or multiple)
-    train_split = args.train_split.split(',') if ',' in args.train_split else args.train_split
+    # Determine paths and format based on arguments
+    if args.dataset_format == 'wsi-bench':
+        # WSI-Bench format: separate train and test JSONs (flat lists)
+        train_path = args.train_json if args.train_json else args.data_json
+        test_path = args.test_json if args.test_json else args.data_json
+        train_split = None  # Not used for wsi-bench
+        val_split = None
+        print(f"Using WSI-Bench dataset format")
+        print(f"  Train JSON: {train_path}")
+        print(f"  Test JSON: {test_path}")
+    else:
+        # HistGen format: single JSON with nested splits
+        train_path = args.data_json
+        test_path = args.data_json
+        train_split = args.train_split.split(',') if ',' in args.train_split else args.train_split
+        val_split = args.val_split
+        print(f"Using HistGen dataset format")
+        print(f"  Data JSON: {args.data_json}")
+        print(f"  Train split(s): {args.train_split}")
+        print(f"  Val split: {args.val_split}")
     
     train_dataset = WSI_Report_Dataset(
-        json_path=args.data_json,
+        json_path=train_path,
+        dataset_format=args.dataset_format,
         split=train_split,
         feature_key=args.feature_key,
         use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     val_dataset = WSI_Report_Dataset(
-        json_path=args.data_json,
-        split=args.val_split,
+        json_path=test_path,
+        dataset_format=args.dataset_format,
+        split=val_split,
         feature_key=args.feature_key,
         use_knowledge_guidance=args.use_knowledge_guidance
     )
     
-    print(f"Train samples: {len(train_dataset)} (split: {args.train_split})")
-    print(f"Val samples: {len(val_dataset)} (split: {args.val_split})")
+    print(f"Train samples: {len(train_dataset)}")
+    print(f"Val samples: {len(val_dataset)}")
     
-    # Initialize collator
+    # Initialize collator with dataset format
     collator = VLMDataCollator(
         tokenizer=tokenizer,
+        dataset_format=args.dataset_format,
         max_length=args.max_length,
         use_knowledge_guidance=args.use_knowledge_guidance,
         max_knowledge_tokens=args.max_knowledge_tokens
@@ -556,14 +602,16 @@ def main():
         start_epoch, optimizer_state = model.load_checkpoint(args.resume_from, load_optimizer=True)
         if optimizer_state is not None:
             optimizer.load_state_dict(optimizer_state)
-        start_epoch += 1
+    start_epoch += 1
     
     # Training loop
     print("\n" + "="*60)
     print("Starting Stage 2 Training")
+    if args.early_stopping:
+        print(f"Early stopping enabled: patience={args.patience}, min_delta={args.min_delta}")
     print("="*60)
     
-    # Initialize history (only track NLU metrics if computed during training)
+    # Initialize history
     history = {
         'train_loss': [],
         'val_loss': []
@@ -579,6 +627,13 @@ def main():
             'meteor': [],
             'rouge_l': []
         })
+    
+    # Early stopping variables
+    epochs_without_improvement = 0
+    early_stopped = False
+    
+    # Track last completed epoch (initialize to start_epoch - 1 in case no epochs run)
+    epoch = start_epoch - 1 if start_epoch > 0 else 0
     
     for epoch in range(start_epoch, args.epochs):
         # Train
@@ -623,22 +678,41 @@ def main():
             model.save_checkpoint(save_path, epoch, optimizer.state_dict(), val_loss=val_loss)
         
         # Save best model
-        if val_loss < best_val_loss:
+        if val_loss < best_val_loss - args.min_delta:
             best_val_loss = val_loss
             best_epoch = epoch
+            epochs_without_improvement = 0  # Reset counter
             best_path = os.path.join(exp_dir, 'best_model.pt')
             model.save_checkpoint(best_path, epoch, optimizer.state_dict(), val_loss=val_loss)
             print(f"  ✓ New best model saved! (val_loss: {val_loss:.4f})")
+        else:
+            epochs_without_improvement += 1
+            if args.early_stopping:
+                print(f"  No improvement for {epochs_without_improvement}/{args.patience} epochs")
+        
+        # Check early stopping
+        if args.early_stopping and epochs_without_improvement >= args.patience:
+            print(f"\n{'='*60}")
+            print(f"Early stopping triggered after {epoch + 1} epochs")
+            print(f"No improvement in validation loss for {args.patience} consecutive epochs")
+            print(f"Best validation loss: {best_val_loss:.4f} at epoch {best_epoch + 1}")
+            print(f"{'='*60}")
+            early_stopped = True
+            break
     
     # Save final model
     final_path = os.path.join(exp_dir, 'final_model.pt')
-    model.save_checkpoint(final_path, args.epochs - 1, optimizer.state_dict(), val_loss=val_loss)
+    model.save_checkpoint(final_path, epoch, optimizer.state_dict(), val_loss=best_val_loss)
     
     # Save final training history
+    history['early_stopped'] = early_stopped
+    history['epochs_completed'] = epoch + 1
     with open(os.path.join(exp_dir, 'training_history.json'), 'w') as f:
         json.dump(history, f, indent=2)
     
     print("\nTraining complete!")
+    if early_stopped:
+        print(f"Stopped early at epoch {epoch + 1}/{args.epochs}")
     print(f"Best model saved at epoch {best_epoch+1} with val_loss: {best_val_loss:.4f}")
     print(f"All checkpoints saved to: {exp_dir}")
     

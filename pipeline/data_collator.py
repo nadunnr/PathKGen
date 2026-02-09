@@ -10,6 +10,8 @@ from transformers import PreTrainedTokenizer
 from config import (
     TRAINING_PROMPT_NO_KNOWLEDGE,
     TRAINING_PROMPT_WITH_KNOWLEDGE,
+    TRAINING_PROMPT_WSI_BENCH,
+    TRAINING_PROMPT_WSI_BENCH_KNOWLEDGE,
     IMAGE_START_TOKEN,
     IMAGE_END_TOKEN
 )
@@ -28,6 +30,7 @@ class VLMDataCollator:
     def __init__(
         self,
         tokenizer: PreTrainedTokenizer,
+        dataset_format: str = 'wsi-bench',
         max_length: int = 512,
         padding: str = "longest",
         use_knowledge_guidance: bool = False,
@@ -36,22 +39,30 @@ class VLMDataCollator:
         """
         Args:
             tokenizer: HuggingFace tokenizer
+            dataset_format: Dataset format ('wsi-bench' or 'histgen')
             max_length: Maximum sequence length
             padding: Padding strategy ('longest' or 'max_length')
             use_knowledge_guidance: Whether to use knowledge-guided prompts
             max_knowledge_tokens: Maximum tokens for knowledge text
         """
         self.tokenizer = tokenizer
+        self.dataset_format = dataset_format
         self.max_length = max_length
         self.padding = padding
         self.use_knowledge_guidance = use_knowledge_guidance
         self.max_knowledge_tokens = max_knowledge_tokens
         
-        # Select appropriate prompt template based on knowledge guidance
-        if use_knowledge_guidance:
-            self.prompt_template = TRAINING_PROMPT_WITH_KNOWLEDGE
-        else:
-            self.prompt_template = TRAINING_PROMPT_NO_KNOWLEDGE
+        # Select appropriate prompt template based on dataset format and knowledge guidance
+        if dataset_format == 'wsi-bench':
+            if use_knowledge_guidance:
+                self.prompt_template = TRAINING_PROMPT_WSI_BENCH_KNOWLEDGE
+            else:
+                self.prompt_template = TRAINING_PROMPT_WSI_BENCH
+        else:  # histgen
+            if use_knowledge_guidance:
+                self.prompt_template = TRAINING_PROMPT_WITH_KNOWLEDGE
+            else:
+                self.prompt_template = TRAINING_PROMPT_NO_KNOWLEDGE
         
         # Ensure pad token is set
         if self.tokenizer.pad_token is None:
@@ -79,11 +90,39 @@ class VLMDataCollator:
         # Extract slide features
         visual_features = torch.stack([item['slide_embedding'] for item in batch])
         
-        # Format prompt_message with prompt template
-        if self.use_knowledge_guidance:
-            prompt_message = [self.prompt_template.format(knowledge=item['knowledge_text'], report=item['report']) for item in batch]
-        else:
-            prompt_message = [self.prompt_template.format(report=item['report']) for item in batch]
+        # Format prompts with prompt template based on dataset format
+        if self.dataset_format == 'wsi-bench':
+            # WSI-Bench: use question and answer fields
+            if self.use_knowledge_guidance:
+                prompt_message = [
+                    self.prompt_template.format(
+                        knowledge=item['knowledge_text'],
+                        question=item['question'],
+                        answer=item['answer']
+                    ) for item in batch
+                ]
+            else:
+                prompt_message = [
+                    self.prompt_template.format(
+                        question=item['question'],
+                        answer=item['answer']
+                    ) for item in batch
+                ]
+        else:  # histgen
+            # HistGen: use report field with fixed prompt
+            if self.use_knowledge_guidance:
+                prompt_message = [
+                    self.prompt_template.format(
+                        knowledge=item['knowledge_text'],
+                        report=item['answer']  # Uses 'answer' which maps to 'report' in HistGen
+                    ) for item in batch
+                ]
+            else:
+                prompt_message = [
+                    self.prompt_template.format(
+                        report=item['answer']  # Uses 'answer' which maps to 'report' in HistGen
+                    ) for item in batch
+                ]
         
         # Tokenize prompt_message
         tokenized = self.tokenizer(

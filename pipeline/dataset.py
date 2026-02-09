@@ -2,35 +2,65 @@ import os
 import json
 import h5py
 import torch
+import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
 class WSI_Report_Dataset(Dataset):
-    def __init__(self, json_path, split = 'train', feature_key='features', use_knowledge_guidance=False):
+    def __init__(self, json_path, dataset_format='wsi-bench', split='train', feature_key='tokens', use_knowledge_guidance=False):
         """
         Custom Dataset for loading Whole Slide Image (WSI) features and corresponding reports.
         
         Args:
             json_path (str): Path to the JSON file containing dataset information.
-            split (str): Dataset split to use ('train', 'val', 'test').
+            dataset_format (str): Format of the dataset - 'wsi-bench' (flat list) or 'histgen' (nested dict).
+            split (str or None): Dataset split to use ('train', 'val', 'test'). 
+                                 Set to None for WSI-Bench (already pre-split files).
             feature_key (str): Key in the H5 file where slide features are stored.
+            use_knowledge_guidance (bool): Whether to use knowledge-guided prompts.
         """
         self.feature_key = feature_key
         self.split = split
         self.use_knowledge_guidance = use_knowledge_guidance
+        self.dataset_format = dataset_format
 
         # Load dataset information from JSON
         with open(json_path, 'r') as info_file:
-            full_dataset = json.load(info_file)
+            data = json.load(info_file)
         
-        #Select the split
-        if isinstance(split, str):
-            self.dataset = full_dataset[split]
-        elif isinstance(split, (list, tuple, set)):
-            self.dataset = []
-            for s in split:
-                self.dataset.extend(full_dataset[s])
+        # Handle different dataset formats
+        if dataset_format == 'histgen':
+            # HistGen format: nested dict with splits {"train": [...], "val": [...], "test": [...]}
+            if split is None:
+                raise ValueError("split must be specified for HistGen format")
+            
+            if isinstance(split, str):
+                self.dataset = data[split]
+            elif isinstance(split, (list, tuple, set)):
+                self.dataset = []
+                for s in split:
+                    self.dataset.extend(data[s])
+            else:
+                raise ValueError("split must be a string or a list/tuple/set of strings.")
+            
+            # Field mappings for HistGen format
+            self.answer_key = 'report'
+            self.has_questions = False
+            
+        elif dataset_format == 'wsi-bench':
+            # WSI-Bench format: flat list (already split into separate files)
+            if not isinstance(data, list):
+                raise ValueError(
+                    f"WSI-Bench format expects a flat list, got {type(data)}. "
+                    f"Are you using the correct dataset_format?"
+                )
+            self.dataset = data
+            
+            # Field mappings for WSI-Bench format
+            self.answer_key = 'T-answer'
+            self.has_questions = True
+            
         else:
-            raise ValueError("split must be a string or a list/tuple/set of strings.")
+            raise ValueError(f"Unknown dataset_format: {dataset_format}. Use 'histgen' or 'wsi-bench'.")
         
         # Filter out samples without feature_path (some val samples may not have features extracted)
         original_len = len(self.dataset)
@@ -49,7 +79,16 @@ class WSI_Report_Dataset(Dataset):
         """
         item = self.dataset[idx]
         feature_path = item['feature_path']
-        report_text = item['report']
+        
+        # Extract question and answer based on dataset format
+        if self.has_questions:
+            # WSI-Bench format: has question field
+            question = item['question']
+            answer = item[self.answer_key]  # 'T-answer'
+        else:
+            # HistGen format: no question field, will use fixed prompt
+            question = None
+            answer = item[self.answer_key]  # 'report'
 
         # Get pre-computed knowledge text if using knowledge guidance
         if self.use_knowledge_guidance:
@@ -62,17 +101,28 @@ class WSI_Report_Dataset(Dataset):
             raise FileNotFoundError(f"Feature file not found: {feature_path}")
 
         with h5py.File(feature_path, 'r') as h5_file:
-            slide_features = h5_file[self.feature_key]
-            slide_embedding = torch.tensor(slide_features[:], dtype=torch.float32)
+            slide_features = h5_file[self.feature_key][:]
+            
+            # Validate shape: must be 2D spatial features [num_tokens, feature_dim]
+            if slide_features.ndim != 2:
+                raise ValueError(
+                    f"Feature file {feature_path} has shape {slide_features.shape}. "
+                    f"Expected 2D spatial features [num_tokens, feature_dim]."
+                )
+            
+            slide_embedding = torch.tensor(slide_features, dtype=torch.float32)
+            # Shape: [128, 768] or [N, 768] depending on encoder
 
-        slide_id = item.get('id', str(idx))
-        organ = item.get('organ', 'unknown')
+        # Get sample metadata
+        slide_id = item.get('tcga_id', item.get('id', str(idx)))
+        organ = item.get('primary_site', item.get('organ', 'unknown'))
 
         return {
             'id': slide_id,
             'organ': organ,
             'slide_embedding': slide_embedding,
-            'report': report_text,
+            'question': question,  # None for HistGen, actual question for WSI-Bench
+            'answer': answer,      # 'report' for HistGen, 'T-answer' for WSI-Bench
             'knowledge_text': knowledge_text
         }
             
@@ -88,7 +138,7 @@ if __name__ == "__main__":
     print("="*80)
     try:
         split = ['train','val']
-        dataset = WSI_Report_Dataset(json_file, split=split, feature_key='features', use_knowledge_guidance=False)
+        dataset = WSI_Report_Dataset(json_file, split=split, feature_key='tokens', use_knowledge_guidance=False)
 
         loader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=2)
 
