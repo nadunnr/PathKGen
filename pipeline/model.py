@@ -12,42 +12,53 @@ from config import (DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS,
 
 class ProjectionLayer(nn.Module):
     """
-    Projects global WSI slide features (768-dim) into multiple visual tokens 
-    in LLM embedding space (3584-dim for Qwen 2.5 7B).
+    Projects spatial WSI slide features into LLM embedding space.
     
-    Design: 
-        - Input: [batch, 768] global slide embedding
-        - Expand to multiple learnable visual tokens
-        - Output: [batch, num_visual_tokens, 3584]
+    WSI-LLaVA Style - Token-wise projection:
+        - Input: [batch, num_tokens, 768] spatial slide embeddings
+        - Project each token independently: [768] → [3584]
+        - Output: [batch, num_tokens, 3584]
+    
+    Note: nn.Linear automatically handles 3D inputs by operating on last dimension.
+    No flattening/reshaping needed - preserves spatial structure!
     """
-    def __init__(self, visual_dim: int = DEFAULT_VISUAL_DIM, llm_hidden_dim: int = DEFAULT_LLM_HIDDEN_DIM, 
-                 num_visual_tokens: int = DEFAULT_NUM_VISUAL_TOKENS, hidden_dim: int = 2048):
+    def __init__(
+        self, 
+        visual_dim: int = DEFAULT_VISUAL_DIM,  # 768 (TITAN feature dim)
+        llm_hidden_dim: int = DEFAULT_LLM_HIDDEN_DIM  # 3584 (Qwen 2.5 7B)
+    ):
         super().__init__()
-        self.num_visual_tokens = num_visual_tokens
-
+        
+        # Token-wise MLP projection (WSI-LLaVA mlp2x_gelu style)
+        # hidden_dim = llm_hidden_dim (3584) to match WSI-LLaVA exactly
         self.projector = nn.Sequential(
-            nn.Linear(visual_dim, hidden_dim),
+            nn.Linear(visual_dim, llm_hidden_dim),      # Per-token: [768] → [3584]
             nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(hidden_dim, llm_hidden_dim * num_visual_tokens)
+            nn.Linear(llm_hidden_dim, llm_hidden_dim)   # Per-token: [3584] → [3584]
         )
 
-        # Learnable visual tokens
-        self.visual_token_template = nn.Parameter(torch.randn(1,num_visual_tokens, llm_hidden_dim)*0.02)
-
     def forward(self, visual_features: torch.Tensor) -> torch.Tensor:
-
-        batch_size = visual_features.shape[0]
+        """
+        Args:
+            visual_features: [batch, num_tokens, 768] spatial features
+                            (e.g., [batch, 128, 768] from TITAN)
+            
+        Returns:
+            visual_tokens: [batch, num_tokens, 3584] projected tokens
+        """
+        # Validate input shape
+        if visual_features.dim() != 3:
+            raise ValueError(
+                f"Expected 3D input [batch, num_tokens, 768], "
+                f"got shape {visual_features.shape}"
+            )
         
-        # Project visual features
-        projected_features = self.projector(visual_features)
+        # Token-wise projection (nn.Linear handles 3D automatically!)
+        # Input:  [batch, num_tokens, 768]
+        # Output: [batch, num_tokens, 3584]
+        visual_tokens = self.projector(visual_features)
         
-        # Expand visual tokens
-        visual_tokens = projected_features.reshape(batch_size, self.num_visual_tokens, -1)
-
-        # Add learnable visual tokens
-        visual_tokens = visual_tokens + self.visual_token_template
-
         return visual_tokens
 
 class VisionLanguageModel(nn.Module):
@@ -96,8 +107,7 @@ class VisionLanguageModel(nn.Module):
         llm_hidden_dim = 3584  # Qwen 2.5 7B
         self.projection = ProjectionLayer(
             visual_dim=visual_dim,
-            llm_hidden_dim=llm_hidden_dim,
-            num_visual_tokens=num_visual_tokens
+            llm_hidden_dim=llm_hidden_dim
         )
         
         # 3. Load language model
@@ -142,7 +152,8 @@ class VisionLanguageModel(nn.Module):
         self.llm_dtype = torch.bfloat16
         
         print(f"VLM initialized successfully!")
-        print(f"  - Projection: {visual_dim} → {num_visual_tokens} tokens × {llm_hidden_dim}")
+        print(f"  - Projection: Token-wise {visual_dim}d → {llm_hidden_dim}d (WSI-LLaVA style)")
+        print(f"  - Visual tokens: Dynamic (determined by encoder output)")
         print(f"  - LLM frozen: {freeze_llm}")
         print(f"  - Using QLoRA: {use_qlora}")
         print(f"  - Gradient checkpointing: {gradient_checkpointing}")
@@ -302,8 +313,13 @@ class VisionLanguageModel(nn.Module):
         batch_size = visual_features.shape[0]
         
         # 1. Project visual features to tokens (ensure dtype matches LLM)
+        # Input: [batch, N, 768] spatial features (e.g., N=128 from TITAN)
+        # Output: [batch, N, 3584] visual tokens
         visual_features = visual_features.to(self.llm_dtype)
-        visual_tokens = self.projection(visual_features)  # [batch, num_visual_tokens, hidden_dim]
+        visual_tokens = self.projection(visual_features)  # Token-wise projection
+        
+        # Get actual number of visual tokens from the input (dynamic)
+        num_visual_tokens = visual_tokens.shape[1]  # e.g., 128 for TITAN
         
         # 2. Get text embeddings
         inputs_embeds = self.llm.get_input_embeddings()(input_ids)  # [batch, seq_len, hidden_dim]
@@ -330,8 +346,13 @@ class VisionLanguageModel(nn.Module):
         if attention_mask is not None:
             before_attn = attention_mask[:, :visual_start_idx]
             after_attn = attention_mask[:, visual_end_idx+1:]
-            # Attention for: start_marker (1) + visual_tokens (64) + end_marker (1)
-            marker_visual_attn = torch.ones(batch_size, 1 + self.projection.num_visual_tokens + 1, dtype=attention_mask.dtype, device=attention_mask.device)
+            # Attention for: start_marker (1) + visual_tokens (N) + end_marker (1)
+            marker_visual_attn = torch.ones(
+                batch_size, 
+                1 + num_visual_tokens + 1, 
+                dtype=attention_mask.dtype, 
+                device=attention_mask.device
+            )
             combined_attention_mask = torch.cat([before_attn, marker_visual_attn, after_attn], dim=1)
         else:
             combined_attention_mask = None
@@ -340,8 +361,13 @@ class VisionLanguageModel(nn.Module):
         if labels is not None:
             before_labels = labels[:, :visual_start_idx]
             after_labels = labels[:, visual_end_idx+1:]
-            # Labels for: start_marker (1) + visual_tokens (64) + end_marker (1) = all -100 (ignore)
-            marker_visual_labels = torch.full((batch_size, 1 + self.projection.num_visual_tokens + 1), -100, dtype=labels.dtype, device=labels.device)
+            # Labels for: start_marker (1) + visual_tokens (N) + end_marker (1) = all -100 (ignore)
+            marker_visual_labels = torch.full(
+                (batch_size, 1 + num_visual_tokens + 1), 
+                -100, 
+                dtype=labels.dtype, 
+                device=labels.device
+            )
             combined_labels = torch.cat([before_labels, marker_visual_labels, after_labels], dim=1)
         else:
             combined_labels = None
