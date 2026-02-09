@@ -7,8 +7,9 @@ import openslide
 import pandas as pd
 import tqdm
 
-wsi_dir = "/home/nadun/wd/datasets/tcga_report_histgen/breast_wsi_dataset"
-output_csv = "/home/nadun/wd/datasets/tcga_report_histgen/breast_wsi_dataset/slide_list.csv"
+# wsi_dir = "/home/nadun/wd/datasets/tcga_report_histgen/breast_wsi_dataset"
+wsi_dir = "/home/nadun/wd/vlm_histo/data/temp_wsis"
+output_csv = os.path.join(wsi_dir, "slide_list.csv")
 wsi_json = "/home/nadun/wd/datasets/tcga_report_histgen/primary_site_splits/breast_dataset.json"
 
 results = []
@@ -54,34 +55,37 @@ if files_to_delete:
         except Exception as e:
             print(f"Error deleting {filename}: {e}")
     
-    # Update JSON file - remove entries from all splits
-    print(f"\nUpdating JSON file: {wsi_json}")
-    with open(wsi_json, "r") as f:
-        data = json.load(f)
-    
-    # Get IDs to remove (without .svs extension)
-    ids_to_remove = set([f.replace('.svs', '') for f in files_to_delete])
-    
-    total_removed = 0
-    # Iterate through all splits (train, val, test, etc.)
-    for split_name in data.keys():
-        if isinstance(data[split_name], list):
-            original_count = len(data[split_name])
-            # Filter out entries where id matches deleted files
-            data[split_name] = [
-                entry for entry in data[split_name] 
-                if entry.get('id') not in ids_to_remove
-            ]
-            removed = original_count - len(data[split_name])
-            total_removed += removed
-            if removed > 0:
-                print(f"  - Removed {removed} entries from '{split_name}' split")
-    
-    # Save updated JSON
-    with open(wsi_json, "w") as f:
-        json.dump(data, f, indent=4)
-    
-    print(f"Total JSON entries removed: {total_removed}")
+    if os.path.exists(wsi_json):
+        # Update JSON file - remove entries from all splits
+        print(f"\nUpdating JSON file: {wsi_json}")
+        with open(wsi_json, "r") as f:
+            data = json.load(f)
+        
+        # Get IDs to remove (without .svs extension)
+        ids_to_remove = set([f.replace('.svs', '') for f in files_to_delete])
+        
+        total_removed = 0
+        # Iterate through all splits (train, val, test, etc.)
+        for split_name in data.keys():
+            if isinstance(data[split_name], list):
+                original_count = len(data[split_name])
+                # Filter out entries where id matches deleted files
+                data[split_name] = [
+                    entry for entry in data[split_name] 
+                    if entry.get('id') not in ids_to_remove
+                ]
+                removed = original_count - len(data[split_name])
+                total_removed += removed
+                if removed > 0:
+                    print(f"  - Removed {removed} entries from '{split_name}' split")
+        
+        # Save updated JSON
+        with open(wsi_json, "w") as f:
+            json.dump(data, f, indent=4)
+        
+        print(f"Total JSON entries removed: {total_removed}")   
+    else:
+        print(f"\nJSON file not found: {wsi_json}")
 
 # 3. Save exactly in TRIDENT format
 df = pd.DataFrame(results)
