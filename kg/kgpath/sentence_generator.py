@@ -11,16 +11,28 @@ NEO4J_PASSWORD = "11111111"  # Change this to your Neo4j password
 NODES_CSV = "/home/nadun/wd/datasets/UMLS_sql/UMLS_DATA/FYP/KGs/nodes.csv"
 RELATIONSHIPS_CSV = "/home/nadun/wd/datasets/UMLS_sql/UMLS_DATA/FYP/KGs/relationships.csv"
 
+# ALLOWED_RELATIONS = {
+#     "isa",
+#     "inverse_isa",
+#     "has_associated_morphology"
+# }
+
 ALLOWED_RELATIONS = {
-    "isa",
-    "inverse_isa",
-    "has_associated_morphology"
+    "has_associated_morphology",
+    "has_finding_site",
+    "has_grade",
+    "has_stage",
+    "has_biomarker",
+    "part_of"
 }
 
 REL_TEMPLATES = {
-    "isa": "{A} is a type of {B}.",
-    "inverse_isa": "{B} is a type of {A}.",
-    "has_associated_morphology": "{A} shows morphology of {B}."
+    "has_associated_morphology": "{A} shows morphology of {B}.",
+    "has_finding_site": "{A} has finding site {B}.",
+    "has_grade": "{A} has grade {B}.",
+    "has_stage": "{A} has stage {B}.",
+    "has_biomarker": "{A} has biomarker {B}.",
+    "part_of": "{A} is part of {B}."
 }
 
 def extract_local_subgraph(seed_cui, max_neighbors=500):

@@ -24,13 +24,11 @@ def read_md(path: Path="/home/nadun/wd/vlm_histo/kg/docs/who-breast/auto/who-bre
         yield text[i:i + chunk_size]
 
 
-def entity_linking(text: str):
+def entity_linking():
     nlp = spacy.load("en_core_sci_sm")
     nlp.add_pipe("scispacy_linker", config={"resolve_abbreviations": True, "linker_name": "umls"})
-    doc = nlp(text)
-    # Store linker reference on doc for later use
     linker = nlp.get_pipe("scispacy_linker")
-    return doc, linker
+    return nlp, linker
 
 
 def get_relations_from_api(cui: str, api_key=UMLS_API_KEY) -> List[Dict]:
@@ -58,6 +56,7 @@ def get_relations_from_api(cui: str, api_key=UMLS_API_KEY) -> List[Dict]:
     except Exception:
         return []
 
+
 def identify_entities(doc, linker):
     "Extract entities and their concept replaced by CUI"
     entities = []
@@ -77,6 +76,13 @@ def identify_entities(doc, linker):
             modified_text = modified_text[:ent.start_char] + f"[{cui}]" + modified_text[ent.end_char:]
     
     return modified_text
+
+
+def extract_unique_entities(doc):
+    "Extract unique CUIs from linked entities in the doc"
+    return {f"{ent._.kb_ents[0][0]}" for ent in doc.ents if ent._.kb_ents}
+
+
 
 
 def linked_entities_with_relations(doc, linker, api_key="21b2a93f-3178-4807-b2e1-513bdbf1af8e") -> pd.DataFrame:

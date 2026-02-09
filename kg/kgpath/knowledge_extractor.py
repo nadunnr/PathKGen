@@ -12,7 +12,7 @@ warnings.filterwarnings("ignore")
 
 
 class KnowledgeExtractor:
-    def __init__(self, model_name: str = "en_core_sci_sm", linker_name: str = "mesh"):
+    def __init__(self, model_name: str = "en_core_sci_sm", linker_name: str = "umls"):
         print(f"Loading scispacy model '{model_name}' and UMLS entity linker '{linker_name}'...")
         
         # Load scispacy model

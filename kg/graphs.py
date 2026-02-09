@@ -16,24 +16,25 @@ while True:
 
 
 class Neo4jLoader:
-    def __init__(self, uri, user, password):
+    def __init__(self, uri, user, password, database="jan27"):
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
+        self.database = database
     
     def close(self):
         self.driver.close()
     
-    def create_constraints(self, database="neo4j"):
+    def create_constraints(self):
         """Create uniqueness constraint on CUI to improve performance"""
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             try:
                 session.run("CREATE CONSTRAINT concept_cui IF NOT EXISTS FOR (c:Concept) REQUIRE c.cui IS UNIQUE")
             except Exception as e:
                 print(f"Constraint may already exist: {e}")
     
-    def load_nodes(self, csv_file, batch_size=1000000, database="neo4j"):
+    def load_nodes(self, csv_file, batch_size=1000000):
         """Load nodes from CSV file in batches"""
         
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             batch = []
             count = 0
             
@@ -67,9 +68,9 @@ class Neo4jLoader:
             SET c.name = node.name
         """, batch=batch)
     
-    def load_relationships(self, csv_file, batch_size=1000000, database="neo4j"):
+    def load_relationships(self, csv_file, batch_size=1000000):
         """Load relationships from CSV file in batches"""        
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             batch = []
             count = 0
             
@@ -122,9 +123,9 @@ class Neo4jLoader:
                 CREATE (a)-[r:{safe_rel_type} {{rela: rel.rela}}]->(b)
             """, batch=rels)
             
-    def update_node_definitions(self, csv_file, batch_size=1000, database="neo4j"):
+    def update_node_definitions(self, csv_file, batch_size=1000):
         """Update existing nodes with definitions from CSV file"""
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             batch = []
             count = 0
             updated = 0
@@ -165,20 +166,21 @@ class Neo4jLoader:
 
 
 class Neo4jQuery:
-    def __init__(self, uri, user, password):
+    def __init__(self, uri, user, password, database="jan27"):
         from neo4j import NotificationDisabledCategory
         self.driver = GraphDatabase.driver(
             uri, 
             auth=(user, password),
             notifications_disabled_categories=[NotificationDisabledCategory.DEPRECATION]
         )
+        self.database = database
     
     def close(self):
         self.driver.close()
     
-    def search_entity(self, search_term, database="neo4j"):
+    def search_entity(self, search_term):
         """Search for entities by name"""
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             result = session.run("""
                 MATCH (c:Concept)
                 WHERE toLower(c.name) CONTAINS toLower($search_term)
@@ -189,9 +191,9 @@ class Neo4jQuery:
             entities = [dict(record) for record in result]
             return entities
     
-    def get_entity_by_cui(self, cui, database="neo4j"):
+    def get_entity_by_cui(self, cui):
         """Get entity by CUI"""
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             result = session.run("""
                 MATCH (c:Concept {cui: $cui})
                 RETURN c.cui as cui, c.name as name
@@ -200,9 +202,9 @@ class Neo4jQuery:
             entity = result.single()
             return dict(entity) if entity else None
     
-    def get_entity_relationships(self, cui, limit=50, database="neo4j"):
+    def get_entity_relationships(self, cui, limit=50):
         """Get all relationships for an entity"""
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             result = session.run("""
                 MATCH (c:Concept {cui: $cui})-[r]-(related:Concept)
                 RETURN c.cui as source_cui, c.name as source_name,
@@ -214,9 +216,9 @@ class Neo4jQuery:
             relationships = [dict(record) for record in result]
             return relationships
     
-    def get_statistics(self, database="neo4j"):
+    def get_statistics(self):
         """Get database statistics"""
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             # Count nodes
             nodes_result = session.run("MATCH (c:Concept) RETURN count(c) as count")
             nodes_count = nodes_result.single()["count"]
@@ -242,9 +244,9 @@ class Neo4jQuery:
                 "top_relationship_types": rel_types
             }
       
-    def find_shortest_path(self, source_cui, target_cui, max_depth=5, database="neo4j"):
+    def find_shortest_path(self, source_cui, target_cui, max_depth=5):
         """Find shortest path between two entities"""
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             result = session.run("""
                 MATCH path = shortestPath(
                     (source:Concept {cui: $source_cui})-[*..%s]-(target:Concept {cui: $target_cui})
@@ -264,9 +266,9 @@ class Neo4jQuery:
                 }
             return None
     
-    def find_all_paths(self, source_cui, target_cui, max_depth=4, limit=10, database="neo4j"):
+    def find_all_paths(self, source_cui, target_cui, max_depth=4, limit=10):
         """Find all paths between two entities (limited)"""
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             result = session.run("""
                 MATCH path = (source:Concept {cui: $source_cui})-[*..%s]-(target:Concept {cui: $target_cui})
                 WITH path, 
@@ -286,7 +288,7 @@ class Neo4jQuery:
                 })
             return paths
     
-    def get_neighbors(self, cui, rel_type=None, direction="both", limit=20, database="neo4j"):
+    def get_neighbors(self, cui, rel_type=None, direction="both", limit=20):
         """Get neighbors of a concept with optional filtering"""
         direction_clause = {
             "outgoing": "-[r]->",
@@ -296,7 +298,7 @@ class Neo4jQuery:
         
         type_filter = f"AND type(r) = '{rel_type}'" if rel_type else ""
         
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             result = session.run(f"""
                 MATCH (c:Concept {{cui: $cui}}){direction_clause}(neighbor:Concept)
                 WHERE c <> neighbor {type_filter}
@@ -308,9 +310,9 @@ class Neo4jQuery:
             neighbors = [dict(record) for record in result]
             return neighbors
    
-    def get_subgraph(self, cui_list, database="neo4j"):
+    def get_subgraph(self, cui_list):
         """Get subgraph connecting a list of concepts"""
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             result = session.run("""
                 MATCH (source:Concept)-[r]->(target:Concept)
                 WHERE source.cui IN $cui_list AND target.cui IN $cui_list
@@ -322,14 +324,14 @@ class Neo4jQuery:
             edges = [dict(record) for record in result]
             return edges
     
-    def get_concept_hierarchy(self, cui, depth=2, direction="children", database="neo4j"):
+    def get_concept_hierarchy(self, cui, depth=2, direction="children"):
         """Get hierarchical relationships (parent/child)"""
         if direction == "parents":
             rel_pattern = "<-[r:CHD|PAR|isa]-"
         else:  # children
             rel_pattern = "-[r:CHD|PAR|isa]->"
         
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             result = session.run(f"""
                 MATCH path = (c:Concept {{cui: $cui}}){rel_pattern}(related:Concept)
                 WHERE length(path) <= $depth
@@ -343,7 +345,7 @@ class Neo4jQuery:
             return hierarchy
     
     def steiner_tree_retrieval(self, cui_list, source_cui=None, relationship_weight_property=None, 
-                              apply_rerouting=False, delta=2.0, database="neo4j"):
+                              apply_rerouting=False, delta=2.0): 
         """
         Find the Steiner tree connecting a list of CUI entities using Neo4j GDS.
         
@@ -381,7 +383,7 @@ class Neo4jQuery:
         if not target_cuis:
             raise ValueError("At least one target CUI is required (different from source)")
         
-        with self.driver.session(database=database) as session:
+        with self.driver.session(database=self.database) as session:
             # First, get the actual node IDs for source and targets
             source_result = session.run(
                 "MATCH (c:Concept {cui: $cui}) RETURN id(c) as nodeId, c.name as name",
@@ -567,23 +569,25 @@ class Neo4jQuery:
 
 
 
+
 if __name__ == '__main__':
     NEO4J_URL = "bolt://localhost:7687"
     NEO4J_USER = "neo4j"
     NEO4J_PASSWORD = "11111111"  # Change this to your Neo4j password
     
-    NODES_CSV = "/home/nadun/wd/datasets/UMLS_sql/UMLS_DATA/FYP/KGs/nodes.csv"
-    RELATIONSHIPS_CSV = "/home/nadun/wd/datasets/UMLS_sql/UMLS_DATA/FYP/KGs/relationships.csv"
+    NODES_CSV = "/home/nadun/wd/datasets/UMLS_sql/neo4jdb/v5/nodes.csv"
+    RELATIONSHIPS_CSV = "/home/nadun/wd/datasets/UMLS_sql/neo4jdb/v5/relationships.csv"
     
-    # ============================================================
-    # EXPERIMENT 1: Load data (uncomment to load)
-    # ============================================================
-    loader = Neo4jLoader(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)  
-    loader.update_node_definitions("/home/nadun/wd/datasets/UMLS_sql/UMLS_DATA/FYP/KGs/definitions.csv", batch_size=1000)  
-    # loader.create_constraints()
-    # loader.load_nodes(NODES_CSV, batch_size=100000)
-    # loader.load_relationships(RELATIONSHIPS_CSV, batch_size=100000)
-    # loader.close()
+
+    loader = Neo4jLoader(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD, database="jan27")  
+    loader.create_constraints()
+    # 
+    loader.load_nodes(NODES_CSV, batch_size=100000)
+# 
+    loader.load_relationships(RELATIONSHIPS_CSV, batch_size=100000)
+
+    loader.update_node_definitions("/home/nadun/wd/datasets/UMLS_sql/neo4jdb/v5/definitions.csv", batch_size=1000)  
+    loader.close()
 
     # query = Neo4jQuery(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
     # print(query.get_neighbors("C0206685", direction="outgoing", limit=50))
