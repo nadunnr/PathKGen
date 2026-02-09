@@ -1,5 +1,0 @@
-datasets:
-  quilt:
-    root: /home/nadun/hdd/QUILT1M
-    csv: ${datasets.quilt.root}/quilt_1M_lookup.csv
-    images: ${datasets.quilt.root}/quilt_1m
