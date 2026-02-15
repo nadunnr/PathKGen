@@ -4,6 +4,8 @@ Configuration file for VLM training and inference.
 Single source of truth for prompts and other shared settings.
 Change the prompt here once, and it updates everywhere.
 """
+import os
+from dataclasses import dataclass
 
 # ============================================================================
 # PROMPT CONFIGURATION
@@ -196,3 +198,50 @@ DEFAULT_SLIDECHAT_CHECKPOINT = "/home/nadun/wd/vlm_histo/checkpoints/SlideChat_W
 DEFAULT_DATA_JSON = "/home/nadun/wd/datasets/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
 DEFAULT_STAGE1_OUTPUT = "/home/nadun/wd/vlm_histo/checkpoints/stage1"
 DEFAULT_STAGE2_OUTPUT = "/home/nadun/wd/vlm_histo/checkpoints/stage2"
+
+
+
+@dataclass
+class Stage1Config:
+    """Configuration for Stage 1 contrastive alignment training."""
+    
+    # ---- Data ----
+    train_csv: str = "/home/nadun/wd/data/dataset/report_dataset_train.csv"
+    test_csv: str = "/home/nadun/wd/data/dataset/report_dataset_test.csv"
+    slide_features_dir: str = "/home/nadun/wd/data/slide_features"  # Has train/ and test/ subdirs
+    text_embeddings_dir: str = "/home/nadun/wd/data/text_embeddings"  # Has train/ and test/ subdirs
+    
+    
+    # ---- TITAN Model ----
+    titan_model_name: str = "MahmoodLab/TITAN"
+    titan_dim: int = 768  # TITAN token dimension (128 tokens × 768-dim each)
+    
+    # ---- Projection Heads ----
+    hidden_dim: int = 3584        # Hidden dimension of MLP projectors
+    alignment_dim: int = 3584     # Output dimension of shared alignment space
+    
+    # ---- Contrastive Loss (WSI-LLaVA paper) ----
+    temperature: float = 0.02   # InfoNCE temperature (paper: τ=0.02)
+    
+    # ---- Training (WSI-LLaVA paper) ----
+    lr: float = 1e-3            # Learning rate (paper: 0.001)
+    weight_decay: float = 0.01
+    batch_size: int = 64        # Batch size (paper: 64)
+    epochs: int = 50            # Total epochs (paper: 50)
+    warmup_ratio: float = 0.03  # Warmup fraction of total steps
+    
+    # ---- Text Encoding ----
+    context_length: int = 128   # TITAN text context length
+    
+    # ---- Checkpointing ----
+    checkpoint_dir: str = "./checkpoints/stage1"
+    save_every_n_epochs: int = 5
+    
+    # ---- System ----
+    device: str = "cuda"
+    num_workers: int = 4
+    seed: int = 42
+    log_interval: int = 10      # Log every N batches
+    
+    def __post_init__(self):
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
