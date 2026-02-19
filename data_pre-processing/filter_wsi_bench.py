@@ -151,47 +151,32 @@ if __name__ == "__main__":
     input_train_file = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-formatted.json"
     input_test_file = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test-formatted.json"
     
-    output_train_file = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-Report-Only.json"
-    output_test_file = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test-Report-Only.json"
+    output_train_file = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train.json"
+    output_test_file = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test.json"
     
     # Defaults for other args
-    default_log_file = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-filter-log.txt"
-    default_feature_dir = "/home/nadun/wd/datasets/wsi_bench/processed/20x_512px_0px_overlap/slide_features_titan"
+    default_train_log_file = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-filter-log.txt"
+    default_test_log_file = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test-filter-log.txt"
+    default_train_feature_dir = "/home/nadun/wd/datasets/wsi_bench/titan_features/train/20x_512px_0px_overlap/slide_features_titan"
+    default_test_feature_dir = "/home/nadun/wd/datasets/wsi_bench/titan_features/test/20x_512px_0px_overlap/slide_features_titan"
     default_tasks = ["Report"]
 
-    if args.input_file and args.output_file:
-        # Run with CLI args
-        filter_wsi_bench(
-            input_file=args.input_file,
-            output_file=args.output_file,
-            tasks=args.tasks if args.tasks else default_tasks,
-            feature_dir=args.feature_dir if args.feature_dir else default_feature_dir,
-            log_file=args.log_file if args.log_file else default_log_file,
-            split_ratio=args.split_ratio,
-            seed=args.seed
-        )
-    else:
-        # Run presets
-        print("I: No input_file provided, running presets...")
-        
-        # Train set
-        filter_wsi_bench(
-            input_file=input_train_file,
-            output_file=output_train_file,
-            tasks=args.tasks if args.tasks else default_tasks,
-            feature_dir=args.feature_dir if args.feature_dir else default_feature_dir,
-            log_file=args.log_file if args.log_file else default_log_file,
-            split_ratio=args.split_ratio,
-            seed=args.seed
-        )
+    filter_wsi_bench(
+        input_file=input_train_file,
+        output_file=output_train_file,
+        tasks=args.tasks if args.tasks else default_tasks,
+        feature_dir=args.feature_dir if args.feature_dir else default_train_feature_dir,
+        log_file=args.log_file if args.log_file else default_train_log_file,
+        split_ratio=0,
+        seed=args.seed
+    )
 
-        # # Test set
-        # filter_wsi_bench(
-        #     input_file=input_test_file,
-        #     output_file=output_test_file,
-        #     tasks=args.tasks if args.tasks else default_tasks,
-        #     feature_dir=args.feature_dir if args.feature_dir else default_feature_dir,
-        #     log_file=default_log_file,
-        #     split_ratio=args.split_ratio,
-        #     seed=args.seed
-        # )
+    filter_wsi_bench(
+        input_file=input_test_file,
+        output_file=output_test_file,
+        tasks=args.tasks if args.tasks else default_tasks,
+        feature_dir=args.feature_dir if args.feature_dir else default_test_feature_dir,
+        log_file=args.log_file if args.log_file else default_test_log_file,
+        split_ratio=0,
+        seed=args.seed
+    )
