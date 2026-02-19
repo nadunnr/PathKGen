@@ -12,17 +12,15 @@ CONCEPT_FILE = "/home/nadun/wd/datasets/UMLS_sql/neo4jdb/v8/nodes.csv"
 INDEX_FILE = "/home/nadun/wd/datasets/wsi_bench/extracted_cuis/umls_index.faiss"
 
 JSON_FOLDER = "/home/nadun/wd/datasets/wsi_bench/extracted_features/outputs"
-OUTPUT_FOLDER = "/home/nadun/wd/datasets/wsi_bench/extracted_cuis/cui_csvs"
+OUTPUT_FOLDER = "/home/nadun/wd/vlm_histo/data_pre-processing/extracted_cuis/cui_csvs"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-
 
 print("Loading SapBERT...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
 model = AutoModel.from_pretrained(MODEL_PATH).to(DEVICE)
 model.eval()
-
 
 print("Loading FAISS index...")
 index = faiss.read_index(INDEX_FILE)
@@ -32,7 +30,6 @@ meta = pd.read_csv(CONCEPT_FILE)
 
 cui_list = meta["cui:ID"].values
 name_list = meta["name"].values
-
 
 def encode_text(text):
     tokens = tokenizer(
