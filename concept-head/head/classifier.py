@@ -18,13 +18,9 @@ os.makedirs(f"{TYPE}", exist_ok=True)
 OUTPUT_PREFIX = f"{TYPE}/{TYPE}_classifier"
 
 # Hyper-parameters
-BATCH_SIZE = 64
-EPOCHS = 150
-LR = 1e-4
-WEIGHT_DECAY = 1e-4
-DROPOUT = 0.3
-LR_PATIENCE = 10
-LR_FACTOR = 0.5
+BATCH_SIZE = 32
+EPOCHS = 20
+LR = 1e-3
 VAL_SPLIT = 0.2
 RANDOM_SEED = 42
 
@@ -52,15 +48,12 @@ class WSIDataset(Dataset):
 
 # Model
 class LinearClassifier(nn.Module):
-    def __init__(self, input_dim, num_classes, dropout=0.3):
+    def __init__(self, input_dim, num_classes):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Dropout(dropout),
-            nn.Linear(input_dim, num_classes)
-        )
+        self.fc = nn.Linear(input_dim, num_classes)
 
     def forward(self, x):
-        return self.net(x)
+        return self.fc(x)
 
 
 # Load labels
@@ -158,18 +151,10 @@ def train():
     # Infer embedding dim
     with h5py.File(os.path.join(EMBEDDING_DIR, f"{ids[0]}.h5"), 'r') as f:
         sample_emb = f['features'][:]
-    model = LinearClassifier(sample_emb.shape[0], len(unique_labels), dropout=DROPOUT).to(device)
+    model = LinearClassifier(sample_emb.shape[0], len(unique_labels)).to(device)
 
-    # Class-weighted loss to handle imbalance
-    from collections import Counter as _Counter
-    all_train_labels = [label_to_idx[l] for l in y_train]
-    class_counts = np.array([_Counter(all_train_labels)[i] for i in range(len(unique_labels))], dtype=np.float32)
-    class_weights = torch.tensor(1.0 / class_counts, dtype=torch.float32).to(device)
-    class_weights = class_weights / class_weights.sum() * len(unique_labels)
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=LR_PATIENCE, factor=LR_FACTOR, verbose=True)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+    criterion = nn.CrossEntropyLoss()
 
     train_losses, val_losses = [], []
 
@@ -208,15 +193,12 @@ def train():
         val_losses.append(val_loss / len(val_loader))
         val_acc = accuracy_score(gts, preds)
         
-        scheduler.step(val_acc)
-        
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             best_epoch = epoch + 1
             torch.save(model.state_dict(), f"{OUTPUT_PREFIX}_best.pt")
         
-        current_lr = optimizer.param_groups[0]['lr']
-        print(f"Epoch {epoch+1}/{EPOCHS} | Train Loss: {train_losses[-1]:.4f} | Val Loss: {val_losses[-1]:.4f} | Val Acc: {val_acc:.4f} | LR: {current_lr:.2e}")
+        print(f"Epoch {epoch+1}/{EPOCHS} | Train Loss: {train_losses[-1]:.4f} | Val Loss: {val_losses[-1]:.4f} | Val Acc: {val_acc:.4f}")
 
     # Metrics
     acc = accuracy_score(gts, preds)
