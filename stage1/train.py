@@ -1,11 +1,3 @@
-"""Stage 1 Training: WSI-Text Contrastive Alignment.
-
-Follows WSI-LLaVA Stage 1:
-- Freeze TITAN image & text encoders
-- Train MLP projection heads via InfoNCE loss
-- Align WSI and text embeddings in shared space
-"""
-
 import os
 import sys
 import json
@@ -15,16 +7,14 @@ import logging
 import argparse
 from pathlib import Path
 from torch.utils.data import DataLoader
-from transformers import AutoModel
 from tqdm import tqdm
 
-from config import Stage1Config
+from ..pipeline.config import Stage1Config
 from models import Stage1AlignmentModel, InfoNCELoss
 from dataset import (
     AlignmentDataset,
     collate_fn,
-    load_dataset_json,
-    precompute_text_embeddings,
+    load_dataset_csv,
 )
 
 logging.basicConfig(
@@ -157,6 +147,65 @@ def validate(
     }
 
 
+@torch.no_grad()
+def compute_recall_at_k(
+    model: Stage1AlignmentModel,
+    dataloader: DataLoader,
+    device: str,
+    k_values=[1, 5, 10],
+):
+    """
+    Compute Recall@K metrics for retrieval tasks.
+    
+    Returns:
+        dict: R@K metrics for both i2t and t2i retrieval
+    """
+    model.eval()
+    
+    all_img = []
+    all_txt = []
+    
+    for batch in dataloader:
+        tokens = batch['tokens'].to(device)
+        text_emb = batch['text_embeddings'].to(device)
+        
+        img_tokens, txt_proj = model(tokens, text_emb)
+        
+        # Mean-pool image tokens if needed
+        if img_tokens.dim() == 3:
+            img_tokens = img_tokens.mean(dim=1)  # [B, N, D] -> [B, D]
+            img_tokens = nn.functional.normalize(img_tokens, p=2, dim=-1)
+        
+        all_img.append(img_tokens.cpu())
+        all_txt.append(txt_proj.cpu())
+    
+    all_img = torch.cat(all_img, dim=0)  # [N, D]
+    all_txt = torch.cat(all_txt, dim=0)  # [N, D]
+    
+    # Compute similarity matrix
+    sim = torch.matmul(all_img, all_txt.T)  # [N, N]
+    N = sim.shape[0]
+    labels = torch.arange(N)
+    
+    results = {}
+    for k in k_values:
+        if k > N:
+            continue
+        
+        # Image → Text retrieval
+        topk_i2t = sim.topk(k, dim=1).indices
+        i2t_recall = (topk_i2t == labels.unsqueeze(1)).any(dim=1).float().mean().item()
+        
+        # Text → Image retrieval
+        topk_t2i = sim.T.topk(k, dim=1).indices
+        t2i_recall = (topk_t2i == labels.unsqueeze(1)).any(dim=1).float().mean().item()
+        
+        results[f'i2t_R@{k}'] = i2t_recall
+        results[f't2i_R@{k}'] = t2i_recall
+    
+    return results
+
+
 def save_checkpoint(model, optimizer, scheduler, epoch, metrics, best_loss, cfg, path):
     torch.save({
         'epoch': epoch,
@@ -177,8 +226,10 @@ def save_checkpoint(model, optimizer, scheduler, epoch, metrics, best_loss, cfg,
 
 def main():
     parser = argparse.ArgumentParser(description="Stage 1: WSI-Text Contrastive Alignment")
-    parser.add_argument('--data_json', type=str, default=None)
-    parser.add_argument('--feature_dir', type=str, default=None)
+    parser.add_argument('--train_csv', type=str, default='/home/sandun/nadun/data/dataset/report_dataset_train.csv')
+    parser.add_argument('--test_csv', type=str, default='/home/sandun/nadun/data/dataset/report_dataset_test.csv', )
+    parser.add_argument('--slide_features_dir', type=str, default='/home/sandun/nadun/data/slide_features')
+    parser.add_argument('--text_embeddings_dir', type=str, default='/home/sandun/nadun/data/text_embeddings')
     parser.add_argument('--batch_size', type=int, default=None)
     parser.add_argument('--lr', type=float, default=None)
     parser.add_argument('--epochs', type=int, default=None)
@@ -201,61 +252,37 @@ def main():
     set_seed(cfg.seed)
     
     logger.info("=" * 60)
-    logger.info("Stage 1: WSI-Text Contrastive Alignment")
+    logger.info("Stage 1: WSI-Text Contrastive Alignment (Direct Projection)")
     logger.info("=" * 60)
-    logger.info(f"Data: {cfg.data_json}")
-    logger.info(f"Architecture: TITAN tokens → zero-pad → CLIP → token-wise MLP")
+    logger.info(f"Train CSV: {cfg.train_csv}")
+    logger.info(f"Test CSV: {cfg.test_csv}")
+    logger.info(f"Slide features: {cfg.slide_features_dir}")
+    logger.info(f"Text embeddings: {cfg.text_embeddings_dir}")
+    logger.info(f"Architecture: TITAN tokens [128,768] → MLP → [128,3584]")
     logger.info(f"Dims: hidden={cfg.hidden_dim}, align={cfg.alignment_dim}")
     logger.info(f"Training: lr={cfg.lr}, bs={cfg.batch_size}, epochs={cfg.epochs}")
     logger.info(f"Temperature: {cfg.temperature}")
     logger.info("=" * 60)
     
-    # Load TITAN for text encoding
-    logger.info("Loading TITAN model...")
-    titan = AutoModel.from_pretrained(cfg.titan_model_name, trust_remote_code=True)
-    titan = titan.to(cfg.device).eval()
-    for p in titan.parameters():
-        p.requires_grad = False
-    
-    # Load data
-    train_samples = load_dataset_json(cfg.data_json, split="train")
-    
-    # Override feature paths if specified
-    if cfg.feature_dir:
-        for s in train_samples:
-            s['feature_path'] = os.path.join(cfg.feature_dir, os.path.basename(s['feature_path']))
-    
-    # Load validation set if available
-    try:
-        val_samples = load_dataset_json(cfg.data_json, split="val")
-        if cfg.feature_dir:
-            for s in val_samples:
-                s['feature_path'] = os.path.join(cfg.feature_dir, os.path.basename(s['feature_path']))
-    except KeyError:
-        val_samples = None
-        logger.info("No validation split found.")
-    
-    # Pre-compute text embeddings
-    logger.info("Pre-computing text embeddings...")
-    train_text_embs = precompute_text_embeddings(
-        [s['report'] for s in train_samples], titan,
-        device=cfg.device, batch_size=cfg.batch_size, context_length=cfg.context_length,
+    # Load data from CSV
+    logger.info("Loading training data from CSV...")
+    train_samples = load_dataset_csv(
+        csv_path=cfg.train_csv,
+        split="train",
     )
     
-    if val_samples:
-        val_text_embs = precompute_text_embeddings(
-            [s['report'] for s in val_samples], titan,
-            device=cfg.device, batch_size=cfg.batch_size, context_length=cfg.context_length,
-        )
-    
-    # Free TITAN from GPU
-    del titan
-    torch.cuda.empty_cache()
+    # Load test data for validation
+    logger.info("Loading test data from CSV...")
+    val_samples = load_dataset_csv(
+        csv_path=cfg.test_csv,
+        split="test",
+    )
     
     # Build datasets & dataloaders
     train_dataset = AlignmentDataset(
         samples=train_samples,
-        text_embeddings=train_text_embs,
+        slide_features_dir=os.path.join(cfg.slide_features_dir, "train"),
+        text_embeddings_dir=os.path.join(cfg.text_embeddings_dir, "train"),
     )
     train_loader = DataLoader(
         train_dataset,
@@ -268,21 +295,20 @@ def main():
     )
     logger.info(f"Train: {len(train_dataset)} samples, {len(train_loader)} batches")
     
-    val_loader = None
-    if val_samples:
-        val_dataset = AlignmentDataset(
-            samples=val_samples,
-            text_embeddings=val_text_embs,
-        )
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=cfg.batch_size,
-            shuffle=False,
-            num_workers=cfg.num_workers,
-            collate_fn=collate_fn,
-            pin_memory=True,
-        )
-        logger.info(f"Val: {len(val_dataset)} samples, {len(val_loader)} batches")
+    val_dataset = AlignmentDataset(
+        samples=val_samples,
+        slide_features_dir=os.path.join(cfg.slide_features_dir, "test"),
+        text_embeddings_dir=os.path.join(cfg.text_embeddings_dir, "test"),
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        num_workers=cfg.num_workers,
+        collate_fn=collate_fn,
+        pin_memory=True,
+    )
+    logger.info(f"Val: {len(val_dataset)} samples, {len(val_loader)} batches")
     
     # Build model, optimizer, scheduler, loss
     model = Stage1AlignmentModel(
@@ -290,8 +316,6 @@ def main():
         text_dim=cfg.titan_dim,
         hidden_dim=cfg.hidden_dim,
         alignment_dim=cfg.alignment_dim,
-        clip_model_name=cfg.clip_model_name,
-        freeze_clip=cfg.freeze_clip,
     ).to(cfg.device)
     
     model.print_trainable_params()
@@ -327,6 +351,21 @@ def main():
         start_epoch = ckpt['epoch'] + 1
         best_loss = ckpt.get('best_loss', float('inf'))
         logger.info(f"Resumed from epoch {ckpt['epoch']}, best_loss={best_loss:.4f}")
+    
+    # ─── Initial evaluation (before training) ───
+    logger.info("=" * 60)
+    logger.info("Initial R@K metrics (random initialization):")
+    logger.info("=" * 60)
+    
+    initial_metrics = compute_recall_at_k(model, train_loader, cfg.device, k_values=[1, 5])
+    for metric_name, value in initial_metrics.items():
+        logger.info(f"  Train {metric_name}: {value:.4f}")
+    
+    initial_val_metrics = compute_recall_at_k(model, val_loader, cfg.device, k_values=[1, 5])
+    for metric_name, value in initial_val_metrics.items():
+        logger.info(f"  Val   {metric_name}: {value:.4f}")
+    
+    logger.info("=" * 60)
     
     # Training loop
     logger.info("Starting training...")
