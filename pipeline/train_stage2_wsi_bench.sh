@@ -9,11 +9,11 @@ echo "Starting Stage 2 Training with WSI-Bench Dataset (Optimized)"
 echo "=============================================================="
 
 # WSI-Bench dataset paths
-TRAIN_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-temp_Report_split0.1_train.json"
-TEST_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-temp_Report_split0.1_test.json"
+TRAIN_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train_Report.json"
+TEST_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test_Report.json"
 
 # Configuration
-STAGE1_CHECKPOINT="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench/2026-02-08_23-34_vt128_ml512_e20_bs8/best_model.pt"
+STAGE1_CHECKPOINT="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench/2026-02-14_15-59_vt128_ml512_e20_bs8/best_model.pt"
 OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage2_wsi_bench"
 
 python train_stage2.py \
@@ -22,18 +22,18 @@ python train_stage2.py \
     --dataset_format wsi-bench \
     --stage1_checkpoint "$STAGE1_CHECKPOINT" \
     --epochs 10\
-    --batch_size 8 \
-    --gradient_accumulation_steps 8 \
-    --lr 2e-4 \
-    --projection_lr 2e-5 \
+    --batch_size 4 \
+    --gradient_accumulation_steps 32 \
+    --lr 1e-4 \
+    --projection_lr 1e-5 \
     --weight_decay 0.0 \
     --early_stopping \
-    --patience 2 \
+    --patience 3 \
     --lora_rank 128 \
     --lora_alpha 256 \
     --feature_key tokens \
     --gradient_checkpointing \
-    --val_batch_size 1 \
+    --val_batch_size 4 \
     --output_dir "$OUTPUT_DIR"
 
 echo ""

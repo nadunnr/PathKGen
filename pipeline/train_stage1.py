@@ -252,8 +252,8 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
                     prompt=None,  # Let model auto-select based on knowledge_text
                     knowledge_text=knowledge_text,
                     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
-                    temperature=0.7,
-                    top_p=0.9
+                    temperature=0.0,  # Greedy decoding for evaluation (SOTA standard)
+                    top_p=1.0         # No nucleus sampling for deterministic output
                 )
                 all_predictions.append(pred_text)
                 

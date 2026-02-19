@@ -176,8 +176,8 @@ DEFAULT_LLM_HIDDEN_DIM = 3584  # Qwen 2.5 7B hidden dimension
 
 # Sequence length settings
 DEFAULT_MAX_LENGTH = 512  # Maximum input sequence length (prompt + report)
-DEFAULT_MAX_NEW_TOKENS = 350  # Maximum tokens to generate during validation
-INFERENCE_MAX_NEW_TOKENS = 400  # Maximum tokens for standalone inference
+DEFAULT_MAX_NEW_TOKENS = 512  # Maximum tokens to generate during validation (increased for safety)
+INFERENCE_MAX_NEW_TOKENS = 512  # Maximum tokens for standalone inference
 
 # Generation parameters
 DEFAULT_TEMPERATURE = 0.7

@@ -4,7 +4,6 @@
 cd "$(dirname "$0")"
 
 python train.py \
-    --data_json /home/nadun/wd/vlm_histo/data/curated_breast_dataset.json \
     --batch_size 64 \
     --lr 1e-3 \
     --epochs 50 \

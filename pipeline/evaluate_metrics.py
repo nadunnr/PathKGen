@@ -53,8 +53,10 @@ def parse_args():
     # Data arguments
     parser.add_argument("--data_json", type=str, default=DEFAULT_DATA_JSON,
                        help="Path to dataset JSON")
+    parser.add_argument("--dataset_format", type=str, default="histgen", choices=["histgen", "wsi-bench"],
+                       help="Dataset format: 'histgen' (nested dict with splits) or 'wsi-bench' (flat list)")
     parser.add_argument("--split", type=str, default="test",
-                       help="Dataset split to evaluate on (default: test)")
+                       help="Dataset split to evaluate on (default: test). Leave empty for wsi-bench format.")
     parser.add_argument("--feature_key", type=str, default="features",
                        help="Key in H5 files for slide features")
     
@@ -73,10 +75,10 @@ def parse_args():
     # Generation arguments
     parser.add_argument("--max_new_tokens", type=int, default=DEFAULT_MAX_NEW_TOKENS,
                        help="Maximum tokens to generate")
-    parser.add_argument("--temperature", type=float, default=0.7,
-                       help="Sampling temperature")
-    parser.add_argument("--top_p", type=float, default=0.9,
-                       help="Nucleus sampling top_p")
+    parser.add_argument("--temperature", type=float, default=0.0,
+                       help="Sampling temperature (0.0 = greedy decoding for evaluation)")
+    parser.add_argument("--top_p", type=float, default=1.0,
+                       help="Nucleus sampling top_p (1.0 = no nucleus sampling)")
     
     # Stage 2 specific arguments
     parser.add_argument("--lora_rank", type=int, default=64,
@@ -205,16 +207,27 @@ def main():
     
     # Create validation dataset
     print("Loading dataset...")
+    # Handle split for different formats
+    if args.dataset_format == 'wsi-bench':
+        # WSI-Bench: already pre-split, no split argument needed
+        val_split = None
+    else:
+        # HistGen: use provided split
+        val_split = args.split
+    
     val_dataset = WSI_Report_Dataset(
         json_path=args.data_json,
-        split=args.split,
+        dataset_format=args.dataset_format,
+        split=val_split,
         feature_key=args.feature_key
     )
-    print(f"  Loaded {len(val_dataset)} samples from '{args.split}' split")
+    print(f"  Loaded {len(val_dataset)} samples from '{args.split if val_split else 'pre-split file'}' split")
+    
     
     # Create data collator
     data_collator = VLMDataCollator(
         tokenizer=tokenizer,
+        dataset_format=args.dataset_format,
         max_length=args.max_length
     )
     
