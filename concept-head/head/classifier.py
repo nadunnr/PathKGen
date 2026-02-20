@@ -9,18 +9,20 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from collections import Counter
 
 # Set-up
 TYPE = "variant"
-LABEL_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/labels_train/{TYPE}_extracted_train.csv"
+# LABEL_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/labels_train/{TYPE}_extracted_train.csv"
+LABEL_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/labels_train/merged_crc_train.csv"
 EMBEDDING_DIR = "/home/nadun/wd/datasets/wsi_bench/slide_features/train"
 os.makedirs(f"{TYPE}", exist_ok=True)
-OUTPUT_PREFIX = f"{TYPE}/{TYPE}_classifier"
+OUTPUT_PREFIX = f"{TYPE}/{TYPE}_merged_crc_classifier"
 
 # Hyper-parameters
-BATCH_SIZE = 32
+BATCH_SIZE = 128
 EPOCHS = 20
-LR = 1e-3
+LR = 3e-4
 VAL_SPLIT = 0.2
 RANDOM_SEED = 42
 
@@ -42,6 +44,8 @@ class WSIDataset(Dataset):
         
         with h5py.File(emb_path, 'r') as f:
             embedding = f['features'][:]
+            embedding = (embedding - embedding.mean()) / (embedding.std() + 1e-6) # normalize
+
 
         label = self.label_to_idx[self.labels[idx]]
         return torch.tensor(embedding, dtype=torch.float32), label
@@ -50,7 +54,13 @@ class WSIDataset(Dataset):
 class LinearClassifier(nn.Module):
     def __init__(self, input_dim, num_classes):
         super().__init__()
-        self.fc = nn.Linear(input_dim, num_classes)
+        self.fc = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, num_classes)
+        )
+
 
     def forward(self, x):
         return self.fc(x)
@@ -148,13 +158,35 @@ def train():
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE)
 
+    # Class weights
+    train_label_counts = Counter(y_train)
+    num_classes = len(unique_labels)
+    total_samples = len(y_train)
+
+    class_weights = []
+
+    for label in unique_labels:
+        count = train_label_counts[label]
+        weight = total_samples / (num_classes * count) # Inverse frequency weighting
+        class_weights.append(weight)
+
+    class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
+
     # Infer embedding dim
     with h5py.File(os.path.join(EMBEDDING_DIR, f"{ids[0]}.h5"), 'r') as f:
         sample_emb = f['features'][:]
     model = LinearClassifier(sample_emb.shape[0], len(unique_labels)).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(
+        weight=class_weights,
+        label_smoothing=0.05
+    )
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=EPOCHS
+    )
 
     train_losses, val_losses = [], []
 
@@ -175,6 +207,7 @@ def train():
             epoch_loss += loss.item()
 
         train_losses.append(epoch_loss / len(train_loader))
+        scheduler.step()
 
         model.eval()
         val_loss = 0.0
@@ -203,7 +236,7 @@ def train():
     # Metrics
     acc = accuracy_score(gts, preds)
     precision, recall, f1, _ = precision_recall_fscore_support(
-        gts, preds, average="weighted"
+        gts, preds, average="macro"
     )
 
     # Save outputs
