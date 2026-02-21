@@ -265,17 +265,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     base_dir = "/home/nadun/wd/datasets/wsi_bench/dataset_raw"
-    output_dir = os.path.join(os.path.dirname(base_dir), "dataset")
+    output_dir = os.path.join(os.path.dirname(base_dir), "dataset/wsi_bench_full")
     os.makedirs(output_dir, exist_ok=True)
     
     # Train set
     train_input = os.path.join(base_dir, "WSI-Bench-train.json")
-    train_output = os.path.join(output_dir, "WSI-Bench-train-formatted.json")
+    train_output = os.path.join(output_dir, "WSI-Bench-train.json")
     train_log = os.path.join(output_dir, "WSI-Bench-train-stats.log")
     convert_wsi_bench_train(train_input, train_output, train_log, use_gdc=args.use_gdc)
     
     # Test set
     test_input = os.path.join(base_dir, "WSI-Bench-test.jsonl")
-    test_output = os.path.join(output_dir, "WSI-Bench-test-formatted.json")
+    test_output = os.path.join(output_dir, "WSI-Bench-test.json")
     test_log = os.path.join(output_dir, "WSI-Bench-test-stats.log")
     convert_wsi_bench_test(test_input, test_output, test_log, use_gdc=args.use_gdc)
