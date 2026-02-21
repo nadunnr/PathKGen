@@ -18,11 +18,11 @@ from sklearn.metrics import (
 )
 
 # Set-up
-LABEL_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_extracted_test.csv"
-TRAIN_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_extracted_train.csv"
+LABEL_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_test_with_site.csv"
+TRAIN_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_train_with_site.csv"
 EMBEDDING_DIR = f"/home/nadun/wd/datasets/wsi_bench/slide_features/test"  # or train for validation
-MODEL_PATH = f"/home/nadun/wd/vlm_histo/concept-head/head/without_tgc/without_tgc_variant_classifier_best.pt"
-OUTPUT_PREFIX = f"without_tgc/without_tgc_variant_inference_test"
+MODEL_PATH = f"/home/nadun/wd/vlm_histo/concept-head/head/with_site/classifier_with_site_best.pt"
+OUTPUT_PREFIX = f"with_site/with_site_variant_inference_test"
 
 # Hyper-parameters
 BATCH_SIZE = 128

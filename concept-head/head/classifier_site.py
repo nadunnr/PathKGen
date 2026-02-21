@@ -1,0 +1,278 @@
+import os
+import csv
+import numpy as np
+import h5py
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+from collections import Counter
+
+# Set-up
+LABEL_CSV = "/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_train_with_site.csv"
+EMBEDDING_DIR = "/home/nadun/wd/datasets/wsi_bench/slide_features/train"
+os.makedirs("with_site", exist_ok=True)
+OUTPUT_PREFIX = "with_site/classifier_with_site"
+
+# Hyper-parameters
+BATCH_SIZE = 128
+EPOCHS = 20
+LR = 3e-4
+VAL_SPLIT = 0.2
+RANDOM_SEED = 42
+SITE_EMB_DIM=16
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Dataset
+class WSIDataset(Dataset):
+    def __init__(self, ids, labels, sites, label_to_idx, site_to_idx):
+        self.ids = ids
+        self.labels = labels
+        self.sites = sites
+        self.label_to_idx = label_to_idx
+        self.site_to_idx = site_to_idx
+
+    def __getitem__(self, idx):
+        tcga_id = self.ids[idx]
+        emb_path = os.path.join(EMBEDDING_DIR, f"{tcga_id}.h5")
+
+        with h5py.File(emb_path, 'r') as f:
+            embedding = f['features'][:]
+            embedding = (embedding - embedding.mean()) / (embedding.std() + 1e-6)
+
+        label = self.label_to_idx[self.labels[idx]]
+        site_id = self.site_to_idx[self.sites[idx]]
+
+        return (
+            torch.tensor(embedding, dtype=torch.float32),
+            torch.tensor(site_id, dtype=torch.long),
+            label
+        )
+    
+    def __len__(self):
+        return len(self.ids)
+
+# Model
+class LinearClassifier(nn.Module):
+    def __init__(self, emb_dim, num_sites, site_emb_dim, num_classes):
+        super().__init__()
+
+        self.site_emb = nn.Embedding(num_sites, site_emb_dim)
+
+        self.fc = nn.Sequential(
+            nn.Linear(emb_dim + site_emb_dim, 256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, num_classes)
+        )
+
+    def forward(self, x, site_id):
+        site_vec = self.site_emb(site_id)
+        x = torch.cat([x, site_vec], dim=1)
+        return self.fc(x)
+
+
+# Load labels
+def load_labels(csv_path):
+    ids, labels, sites = [], [], []
+
+    with open(csv_path, "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            ids.append(row["tcga_id"])
+            labels.append(row["final_class"])
+            sites.append(row["primary_site"])   # or organ column
+
+    return ids, labels, sites
+
+# Training 
+def train():
+    torch.manual_seed(RANDOM_SEED)
+    np.random.seed(RANDOM_SEED)
+
+    ids, labels, sites = load_labels(LABEL_CSV)
+    
+    # Filter out samples without embedding files
+    print("Checking for missing embedding files...")
+    valid_ids = []
+    valid_labels = []
+    valid_sites = []
+    missing_count = 0
+    
+    for id_, label, site in zip(ids, labels, sites):
+        emb_path = os.path.join(EMBEDDING_DIR, f"{id_}.h5")
+        if os.path.exists(emb_path):
+            valid_ids.append(id_)
+            valid_labels.append(label)
+            valid_sites.append(site)
+        else:
+            missing_count += 1
+    
+    if missing_count > 0:
+        print(f"Removed {missing_count} samples without embedding files")
+    
+    ids = valid_ids
+    labels = valid_labels
+    sites = valid_sites
+    
+    # histology vocab
+    unique_labels = sorted(set(labels))
+    label_to_idx = {l: i for i, l in enumerate(unique_labels)}
+
+    # Site vocab
+    unique_sites = sorted(set(sites))
+    site_to_idx = {s: i for i, s in enumerate(unique_sites)}
+    
+    # Print dataset statistics
+    print(f"\n{'='*60}")
+    print(f"Dataset Statistics")
+    print(f"{'='*60}")
+    print(f"Total samples: {len(ids)}")
+    print(f"Number of classes: {len(unique_labels)}")
+    print(f"Number of sites: {len(unique_sites)}")
+
+    X_train, X_val, y_train, y_val, sites_train, sites_val = train_test_split(
+        ids, labels, sites, test_size=VAL_SPLIT, random_state=RANDOM_SEED, stratify=labels
+    )
+    
+    print(f"Train samples: {len(X_train)}")
+    print(f"Validation samples: {len(X_val)}")
+    print(f"Device: {device}\n")
+
+    train_ds = WSIDataset(X_train, y_train, sites_train, label_to_idx, site_to_idx)
+    val_ds = WSIDataset(X_val, y_val, sites_val, label_to_idx, site_to_idx)
+
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE)
+
+    # Class weights
+    train_label_counts = Counter(y_train)
+    num_classes = len(unique_labels)
+    total_samples = len(y_train)
+
+    class_weights = []
+
+    for label in unique_labels:
+        count = train_label_counts[label]
+        weight = total_samples / (num_classes * count) # Inverse frequency weighting
+        class_weights.append(weight)
+
+    class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
+
+    # Infer embedding dim
+    with h5py.File(os.path.join(EMBEDDING_DIR, f"{ids[0]}.h5"), 'r') as f:
+        sample_emb = f['features'][:]
+    model = LinearClassifier(sample_emb.shape[0], len(unique_sites), SITE_EMB_DIM, len(unique_labels)).to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+    criterion = nn.CrossEntropyLoss(
+        weight=class_weights,
+        label_smoothing=0.05
+    )
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=EPOCHS
+    )
+
+    train_losses, val_losses = [], []
+
+    best_val_acc = 0.0
+    best_epoch = 0
+    
+    for epoch in range(EPOCHS):
+        model.train()
+        epoch_loss = 0.0
+
+        for x, site_id, y in tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Train]", leave=False):
+            x, site_id, y = x.to(device), site_id.to(device), y.to(device)
+            optimizer.zero_grad()
+            logits = model(x, site_id)
+            loss = criterion(logits, y)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+
+        train_losses.append(epoch_loss / len(train_loader))
+        scheduler.step()
+
+        model.eval()
+        val_loss = 0.0
+        preds, gts = [], []
+
+        with torch.no_grad():
+            for x, site_id, y in tqdm(val_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Val]  ", leave=False):
+                x, site_id, y = x.to(device), site_id.to(device), y.to(device)
+                logits = model(x, site_id)
+                loss = criterion(logits, y)
+                val_loss += loss.item()
+
+                preds.extend(torch.argmax(logits, dim=1).cpu().numpy())
+                gts.extend(y.cpu().numpy())
+
+        val_losses.append(val_loss / len(val_loader))
+        val_acc = accuracy_score(gts, preds)
+        
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_epoch = epoch + 1
+            torch.save(model.state_dict(), f"{OUTPUT_PREFIX}_best.pt")
+        
+        print(f"Epoch {epoch+1}/{EPOCHS} | Train Loss: {train_losses[-1]:.4f} | Val Loss: {val_losses[-1]:.4f} | Val Acc: {val_acc:.4f}")
+
+    # Metrics
+    acc = accuracy_score(gts, preds)
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        gts, preds, average="macro"
+    )
+
+    # Save outputs
+    torch.save(model.state_dict(), f"{OUTPUT_PREFIX}_final.pt")
+    
+    print(f"\n{'='*60}")
+    print(f"Final Validation Metrics")
+    print(f"{'='*60}")
+    print(f"Accuracy:  {acc:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall:    {recall:.4f}")
+    print(f"F1-score:  {f1:.4f}")
+    print(f"Best Val Accuracy: {best_val_acc:.4f} (Epoch {best_epoch})")
+    print(f"{'='*60}\n")
+
+    with open(f"{OUTPUT_PREFIX}_metrics.txt", "w") as f:
+        f.write(f"Classes: {unique_labels}\n")
+        f.write(f"Number of classes: {len(unique_labels)}\n")
+        f.write(f"Total samples: {len(ids)}\n")
+        f.write(f"Train samples: {len(X_train)}\n")
+        f.write(f"Val samples: {len(X_val)}\n\n")
+        f.write(f"Final Validation Metrics:\n")
+        f.write(f"Accuracy: {acc:.4f}\n")
+        f.write(f"Precision: {precision:.4f}\n")
+        f.write(f"Recall: {recall:.4f}\n")
+        f.write(f"F1-score: {f1:.4f}\n\n")
+        f.write(f"Best Val Accuracy: {best_val_acc:.4f} (Epoch {best_epoch})\n")
+
+    plt.figure()
+    plt.plot(train_losses, label="Train Loss")
+    plt.plot(val_losses, label="Val Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Training Curve")
+    plt.savefig(f"{OUTPUT_PREFIX}_loss.png", dpi=300)
+    plt.close()
+
+    print("Training complete.")
+    print(f"Saved final model to {OUTPUT_PREFIX}_final.pt")
+    print(f"Saved best model to {OUTPUT_PREFIX}_best.pt")
+    print(f"Saved metrics to {OUTPUT_PREFIX}_metrics.txt")
+    print(f"Saved loss plot to {OUTPUT_PREFIX}_loss.png")
+
+
+# Run script
+if __name__ == "__main__":
+    train()
