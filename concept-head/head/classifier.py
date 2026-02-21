@@ -12,12 +12,10 @@ from tqdm import tqdm
 from collections import Counter
 
 # Set-up
-TYPE = "variant"
-# LABEL_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/labels_train/{TYPE}_extracted_train.csv"
-LABEL_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/labels_train/merged_crc_train.csv"
+LABEL_CSV = "/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_extracted_train.csv"
 EMBEDDING_DIR = "/home/nadun/wd/datasets/wsi_bench/slide_features/train"
-os.makedirs(f"{TYPE}", exist_ok=True)
-OUTPUT_PREFIX = f"{TYPE}/{TYPE}_merged_crc_classifier"
+os.makedirs("without_tgc", exist_ok=True)
+OUTPUT_PREFIX = "without_tgc/without_tgc_variant_classifier"
 
 # Hyper-parameters
 BATCH_SIZE = 128

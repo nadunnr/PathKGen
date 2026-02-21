@@ -18,12 +18,11 @@ from sklearn.metrics import (
 )
 
 # Set-up
-TYPE = "variant"
-SPLIT = "train"
-LABEL_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/labels_{SPLIT}/{TYPE}_extracted_{SPLIT}.csv"
-EMBEDDING_DIR = f"/home/nadun/wd/datasets/wsi_bench/slide_features/{SPLIT}"  # or train for validation
-MODEL_PATH = f"/home/nadun/wd/vlm_histo/concept-head/head/variant/variant_classifier_best.pt"
-OUTPUT_PREFIX = f"{TYPE}/{TYPE}_inference_{SPLIT}"
+LABEL_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_extracted_test.csv"
+TRAIN_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_extracted_train.csv"
+EMBEDDING_DIR = f"/home/nadun/wd/datasets/wsi_bench/slide_features/test"  # or train for validation
+MODEL_PATH = f"/home/nadun/wd/vlm_histo/concept-head/head/without_tgc/without_tgc_variant_classifier_best.pt"
+OUTPUT_PREFIX = f"without_tgc/without_tgc_variant_inference_test"
 
 # Hyper-parameters
 BATCH_SIZE = 128
@@ -81,11 +80,10 @@ def load_ids(csv_path):
 # Inference
 def inference():
     print(f"\n{'='*60}")
-    print(f"Running inference on {SPLIT} set")
+    print(f"Running inference on {LABEL_CSV}")
     print(f"{'='*60}\n")
     
     # Derive class list from the checkpoint output shape + train CSV unique labels
-    TRAIN_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/labels_train/{TYPE}_extracted_train.csv"
     ckpt = torch.load(MODEL_PATH, map_location="cpu")
     num_classes = ckpt["fc.3.weight"].shape[0]
 
@@ -169,7 +167,7 @@ def inference():
 
         with open(metrics_txt, "w") as mf:
             mf.write(f"{'='*60}\n")
-            mf.write(f"Metrics — {TYPE.capitalize()} ({SPLIT} split)\n")
+            mf.write(f"Metrics)\n")
             mf.write(f"{'='*60}\n\n")
             mf.write(f"  Accuracy  : {acc * 100:.2f}%\n")
             mf.write(f"  Macro-F1  : {macro_f1:.4f}\n\n")
@@ -206,7 +204,7 @@ def inference():
         ax.set_yticklabels(present_labels, rotation=0, fontsize=8)
         ax.set_xlabel("Predicted", fontsize=12)
         ax.set_ylabel("Ground Truth", fontsize=12)
-        ax.set_title(f"{TYPE.capitalize()} — Confusion Matrix (Macro-F1: {macro_f1:.4f})", fontsize=13)
+        ax.set_title(f"Confusion Matrix (Macro-F1: {macro_f1:.4f})", fontsize=13)
         plt.tight_layout()
 
         cm_path = f"{OUTPUT_PREFIX}_confusion_matrix.png"
