@@ -6,8 +6,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CLASS_TO_REMOVE = "Testicular Germ Cell Tumors"
 
 csv_files = [
-    os.path.join(BASE_DIR, "variant_extracted_test.csv"),
-    os.path.join(BASE_DIR, "variant_extracted_train.csv"),
+    os.path.join(BASE_DIR, "variant_test_with_site.csv"),
+    os.path.join(BASE_DIR, "variant_train_with_site.csv"),
 ]
 
 for csv_path in csv_files:

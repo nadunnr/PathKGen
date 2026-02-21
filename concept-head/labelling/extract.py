@@ -1,105 +1,54 @@
 import csv
 import re
-from pathlib import Path
-from tqdm import tqdm
-from histology import *
-from organ import *
-from grade import *
-from variants import *
+from lookup import SPLIT_RULES, FINAL_CLASS_REMAP, HIST_TO_CUI
 
-def extract_descriptor(row, descriptor, histology=None):
-    text_fields = []
+INPUT_CSV = "/home/nadun/wd/datasets/wsi_bench/dataset/report_dataset_test.csv"
+OUTPUT_CSV = "labels_test/variant_extracted_test.csv"
 
-    for key in [
-        "report_content",
-        "project_name",
-        "primary_site",
-        "disease_type"
-    ]:
-        if key in row and row[key]:
-            text_fields.append(row[key].lower())
+# Helper
+def split_compound_class(tcga_id: str, project_name: str, report_text: str) -> str:
+    text = report_text.lower()
 
-    full_text = " ".join(text_fields)
-
-    if descriptor == "histology":
-        for hist in HISTOLOGY_PRIORITY:
-            for pattern in HISTOLOGY_PATTERNS[hist]:
-                if re.search(pattern, full_text):
-                    return hist
-
-    elif descriptor == "site":
-        for site in SITE_PRIORITY:
-            for pattern in SITE_PATTERNS[site]:
-                if re.search(pattern, full_text):
-                    return site
-
-    elif descriptor == "grade":
-        for grad in GRADE_PRIORITY:
-            for pattern in GRADE_PATTERNS[grad]:
-                if re.search(pattern, full_text):
-                    return grad
-
-    elif descriptor == "variant":
-        if histology is None:
-            return None
-
-        if histology not in VARIANT_PATTERNS:
-            return None
-
-        for variant, patterns in VARIANT_PATTERNS[histology].items():
-            for pattern in patterns:
-                if re.search(pattern, full_text):
-                    return variant
+    for final_class, patterns in SPLIT_RULES[project_name]:
+        for pat in patterns:
+            if re.search(pat, text):
+                return final_class
+    
+    print(f"Exact class not decided for {tcga_id}")
 
     return None
+ 
+# Main processing
+with open(INPUT_CSV, newline="", encoding="utf-8") as infile, \
+     open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as outfile:
 
+    reader = csv.DictReader(infile)
+    writer = csv.DictWriter(outfile, fieldnames=["tcga_id", "final_class", "cui"])
+    writer.writeheader()
 
+    for row in reader:
+        tcga_id = row["tcga_id"]
+        project = row["project_name"]
+        report = row["report_content"]
 
-def process_csv(input_csv, output_csv, descriptor="histology"):
-    if descriptor not in ["histology", "site", "grade", "variant"]:
-        raise ValueError("Descriptor must be either 'histology', 'site', 'grade' or 'variant'")
+        # Step 1: split compound projects if needed
+        if project in SPLIT_RULES:
+            final_class = split_compound_class(tcga_id, project, report)
+            if final_class is None:
+                print(f"Skipping {tcga_id} as exact class not decided")
+                continue
+        else:
+            final_class = project
 
-    output_csv = Path(output_csv)
-    write_header = not output_csv.exists()
+        # Step 2: remap to desired name
+        final_class = FINAL_CLASS_REMAP.get(final_class, final_class)
 
-    with open(output_csv, "a", newline="", encoding="utf-8") as out_f:
-        writer = csv.DictWriter(out_f, fieldnames=["tcga_id", descriptor, "cui"])
+        cui = HIST_TO_CUI.get(final_class, "")
 
-        if write_header:
-            writer.writeheader()
+        writer.writerow({
+            "tcga_id": tcga_id,
+            "final_class": final_class,
+            "cui": cui
+        })
 
-        with open(input_csv, "r", encoding="utf-8") as in_f:
-            reader = csv.DictReader(in_f)
-            rows = list(reader)
-
-            for row in tqdm(rows, desc="Processing slides", unit="slide"):
-                tcga_id = row.get("tcga_id")
-                if descriptor == "variant":
-                    histology = extract_descriptor(row, "histology")
-                    description = extract_descriptor(row, descriptor, histology)
-                else:
-                    description = extract_descriptor(row, descriptor)
-
-                if tcga_id and description:
-                    if descriptor == "histology":
-                        cui = HISTOLOGY_TO_CUI.get(description)
-                    elif descriptor == "site":
-                        cui = SITE_TO_CUI.get(description)
-                    elif descriptor == "grade":
-                        cui = GRADE_TO_CUI.get(description)
-                    elif descriptor == "variant":
-                        cui = VARIANT_TO_CUI.get(description)
-
-                    writer.writerow({
-                        "tcga_id": tcga_id,
-                        f"{descriptor}": description,
-                        "cui": cui
-                    })
-                    out_f.flush()
-                else:
-                    print(f"Could not extract {descriptor} for {tcga_id}")
-
-if __name__ == "__main__":
-    input_csv = "/home/nadun/wd/datasets/wsi_bench/dataset/report_dataset_train.csv"
-    output_csv = "variant_extracted_train.csv"
-    process_csv(input_csv, output_csv, descriptor="variant")
+print("Class remapping complete. Output written to:", OUTPUT_CSV)
