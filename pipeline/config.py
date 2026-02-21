@@ -72,15 +72,15 @@ Use to help, but verify visually.<|im_end|>
 # ============================================================================
 
 # WSI-Bench dataset paths (pre-split into train/test)
-WSI_BENCH_TRAIN = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-temp_Report_split0.1_train.json"
-WSI_BENCH_TEST = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-temp_Report_split0.1_test.json"
+WSI_BENCH_TRAIN = "/home/sandun/nadun/data/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
+WSI_BENCH_TEST = "/home/sandun/nadun/data/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
 
 # WSI-Bench dataset paths WITH KNOWLEDGE
-WSI_BENCH_TRAIN_KNOWLEDGE = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train_Report_knowledge.json"
-WSI_BENCH_TEST_KNOWLEDGE = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test_Report_knowledge.json"
+WSI_BENCH_TRAIN_KNOWLEDGE = "/home/sandun/nadun/data/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
+WSI_BENCH_TEST_KNOWLEDGE = "/home/sandun/nadun/data/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
 
 # HistGen dataset path (contains splits internally)
-HISTGEN_DATASET = "/home/nadun/wd/datasets/WSIBench/processed/histgen_dataset.json"  # Example path
+HISTGEN_DATASET = "/home/sandun/nadun/data/dataset/histgen_dataset.json"  # Example path
 
 # ============================================================================
 # INFERENCE/GENERATION PROMPTS
@@ -200,11 +200,11 @@ DEFAULT_MAX_KNOWLEDGE_TOKENS = 64
 # ============================================================================
 
 # Default paths (can be overridden by command-line arguments)
-DEFAULT_LLM_PATH = "/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
-DEFAULT_SLIDECHAT_CHECKPOINT = "/home/nadun/wd/vlm_histo/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt"
+DEFAULT_LLM_PATH = "/home/sandun/nadun/histo_vlm/checkpoints/Qwen2.5-7B-Instruct"
+DEFAULT_SLIDECHAT_CHECKPOINT = "/home/sandun/nadun/vlm_histo_old/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt"
 DEFAULT_DATA_JSON = "/home/nadun/wd/datasets/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
-DEFAULT_STAGE1_OUTPUT = "/home/nadun/wd/vlm_histo/checkpoints/stage1"
-DEFAULT_STAGE2_OUTPUT = "/home/nadun/wd/vlm_histo/checkpoints/stage2"
+DEFAULT_STAGE1_OUTPUT = "/home/sandun/nadun/histo_vlm/checkpoints/stage1"
+DEFAULT_STAGE2_OUTPUT = "/home/sandun/nadun/histo_vlm/checkpoints/stage2"
 
 
 

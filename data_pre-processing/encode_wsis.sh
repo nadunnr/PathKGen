@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Configuration
-WSI_DIR="/home/nadun/wd/vlm_histo/data/temp_wsis"
-JOB_DIR="/home/nadun/wd/vlm_histo/data/trident_processed"
-CSV_PATH="/home/nadun/wd/vlm_histo/data/temp_wsis/slide_list.csv"
-LOG_FILE="/home/nadun/wd/vlm_histo/data/trident_processed/pipeline_status.log"
+WSI_DIR="/home/sandun/nadun/vlm_histo/data/temp_wsis"
+JOB_DIR="/home/sandun/nadun/vlm_histo/data/trident_processed"
+CSV_PATH="/home/sandun/nadun/vlm_histo/data/temp_wsis/slide_list.csv"
+LOG_FILE="/home/sandun/nadun/vlm_histo/data/trident_processed/pipeline_status.log"
 
 # Initialize or clear previous log
 echo "--- TRIDENT EXECUTION LOG ($(date)) ---" > "$LOG_FILE"
