@@ -47,13 +47,16 @@ class WSI_Report_Dataset(Dataset):
             self.has_questions = False
             
         elif dataset_format == 'wsi-bench':
-            # WSI-Bench format: flat list (already split into separate files)
-            if not isinstance(data, list):
+            # WSI-Bench format: flat list OR dict (already split into separate files)
+            if isinstance(data, dict):
+                self.dataset = list(data.values())
+            elif isinstance(data, list):
+                self.dataset = data
+            else:
                 raise ValueError(
-                    f"WSI-Bench format expects a flat list, got {type(data)}. "
+                    f"WSI-Bench format expects a flat list or dict, got {type(data)}. "
                     f"Are you using the correct dataset_format?"
                 )
-            self.dataset = data
             
             # Field mappings for WSI-Bench format
             self.answer_key = 'T-answer'

@@ -12,16 +12,19 @@ echo "================================================="
 TRAIN_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train_Report.json"
 TEST_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test_Report.json"
 
+KNOWLEDGE_TRAIN_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train_Report_knowledge.json"
+KNOWLEDGE_TEST_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test_Report_knowledge.json"
+
 # Configuration
-OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench"
+OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench_knowledge"
 
 python train_stage1.py \
-    --train_json "$TRAIN_JSON" \
-    --test_json "$TEST_JSON" \
+    --train_json "$KNOWLEDGE_TRAIN_JSON" \
+    --test_json "$KNOWLEDGE_TEST_JSON" \
     --dataset_format wsi-bench \
-    --epochs 20 \
-    --batch_size 8 \
-    --gradient_accumulation_steps 8 \
+    --epochs 10 \
+    --batch_size 4 \
+    --gradient_accumulation_steps 16 \
     --lr 5e-4 \
     --early_stopping \
     --patience 3 \
@@ -29,7 +32,8 @@ python train_stage1.py \
     --feature_key tokens \
     --gradient_checkpointing \
     --val_batch_size 4 \
-    --output_dir "$OUTPUT_DIR"
-q
+    --output_dir "$OUTPUT_DIR" \
+    --use_knowledge_guidance
+
 echo ""
 echo "Stage 1 training complete! Checkpoints saved to: $OUTPUT_DIR"

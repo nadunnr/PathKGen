@@ -32,8 +32,9 @@ Please analyze this whole slide image and provide a detailed diagnostic report d
 TRAINING_PROMPT_WITH_KNOWLEDGE = """<|im_start|>system
 You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.
 
-Relevant medical knowledge from UMLS knowledge graph:
-{knowledge}<|im_end|>
+Generic knowledge regarding histology type (96.5%_accurate). The site is exact.
+{knowledge}
+Use to help, but verify visually.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
 Please analyze this whole slide image and provide a detailed diagnostic report describing the key histopathological features and diagnosis.<|im_end|>
@@ -57,8 +58,9 @@ You are a pathology assistant specialized in analyzing whole slide images of tis
 TRAINING_PROMPT_WSI_BENCH_KNOWLEDGE = """<|im_start|>system
 You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.
 
-Relevant medical knowledge from UMLS knowledge graph:
-{knowledge}<|im_end|>
+Generic knowledge regarding histology type (96.5% accurate). The site is exact.
+{knowledge}
+Use to help, but verify visually.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
 {question}<|im_end|>
@@ -72,6 +74,10 @@ Relevant medical knowledge from UMLS knowledge graph:
 # WSI-Bench dataset paths (pre-split into train/test)
 WSI_BENCH_TRAIN = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-temp_Report_split0.1_train.json"
 WSI_BENCH_TEST = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-temp_Report_split0.1_test.json"
+
+# WSI-Bench dataset paths WITH KNOWLEDGE
+WSI_BENCH_TRAIN_KNOWLEDGE = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train_Report_knowledge.json"
+WSI_BENCH_TEST_KNOWLEDGE = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test_Report_knowledge.json"
 
 # HistGen dataset path (contains splits internally)
 HISTGEN_DATASET = "/home/nadun/wd/datasets/WSIBench/processed/histgen_dataset.json"  # Example path
@@ -97,10 +103,11 @@ You are an expert pathology AI assistant specialized in analyzing whole slide im
 <|im_start|>user
 <image_start><image_end>
 
-Medical Knowledge Context:
+Generic knowledge regarding histology type (96.5% accurate). The site is exact.
 {knowledge}
+Use to help, but verify visually.
 
-Using the whole slide histopathology image and the medical knowledge provided, generate a concise single-paragraph pathology diagnosis.<|im_end|>
+Generate a concise single-paragraph pathology diagnosis.<|im_end|>
 <|im_start|>assistant
 """
 
@@ -175,7 +182,7 @@ DEFAULT_LLM_HIDDEN_DIM = 3584  # Qwen 2.5 7B hidden dimension
 # ============================================================================
 
 # Sequence length settings
-DEFAULT_MAX_LENGTH = 512  # Maximum input sequence length (prompt + report)
+DEFAULT_MAX_LENGTH = 768  # Maximum input sequence length (prompt + report) - increased for knowledge context
 DEFAULT_MAX_NEW_TOKENS = 512  # Maximum tokens to generate during validation (increased for safety)
 INFERENCE_MAX_NEW_TOKENS = 512  # Maximum tokens for standalone inference
 

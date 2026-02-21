@@ -484,6 +484,11 @@ def main():
         print(f"  Data JSON: {args.data_json}")
         print(f"  Train split(s): {args.train_split}")
         print(f"  Val split: {args.val_split}")
+
+    if args.use_knowledge_guidance:
+        print("Using knowledge guidance")
+    else:
+        print("Not using knowledge guidance")
     
     train_dataset = WSI_Report_Dataset(
         json_path=train_path,

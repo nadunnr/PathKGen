@@ -12,29 +12,37 @@ echo "=============================================================="
 TRAIN_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train_Report.json"
 TEST_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test_Report.json"
 
+KNOWLEDGE_TRAIN_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train_Report_knowledge.json"
+KNOWLEDGE_TEST_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test_Report_knowledge.json"
+
 # Configuration
-STAGE1_CHECKPOINT="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench/2026-02-14_15-59_vt128_ml512_e20_bs8/best_model.pt"
-OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage2_wsi_bench"
+OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage2_wsi_bench_knowledge"
+
+# Configuration
+STAGE1_CHECKPOINT="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench_knowledge/2026-02-20_04-09_vt128_ml768_e10_bs4/best_model.pt"
 
 python train_stage2.py \
-    --train_json "$TRAIN_JSON" \
-    --test_json "$TEST_JSON" \
+    --train_json "$KNOWLEDGE_TRAIN_JSON" \
+    --test_json "$KNOWLEDGE_TEST_JSON" \
     --dataset_format wsi-bench \
     --stage1_checkpoint "$STAGE1_CHECKPOINT" \
-    --epochs 10\
+    --compute_metrics_during_training \
+    --epochs 2\
     --batch_size 4 \
     --gradient_accumulation_steps 32 \
+    --num_workers 8 \
     --lr 1e-4 \
     --projection_lr 1e-5 \
     --weight_decay 0.0 \
     --early_stopping \
-    --patience 3 \
+    --patience 1 \
     --lora_rank 128 \
     --lora_alpha 256 \
     --feature_key tokens \
     --gradient_checkpointing \
     --val_batch_size 4 \
-    --output_dir "$OUTPUT_DIR"
+    --output_dir "$OUTPUT_DIR"\
+    --use_knowledge_guidance
 
 echo ""
 echo "Training complete! Checkpoints saved to: $OUTPUT_DIR"
