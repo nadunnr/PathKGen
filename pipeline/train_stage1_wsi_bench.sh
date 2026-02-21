@@ -18,8 +18,8 @@ KNOWLEDGE_TEST_JSON="/home/sandun/nadun/data/dataset/wsi_bench_Report_knowledge/
 OUTPUT_DIR="/home/sandun/nadun/vlm_histo/checkpoints/stage1_wsi_bench_knowledge"
 
 python train_stage1.py \
-    --train_json "$KNOWLEDGE_TRAIN_JSON" \
-    --test_json "$KNOWLEDGE_TEST_JSON" \
+    --train_json "$WSI_BENCH_TRAIN" \
+    --test_json "$WSI_BENCH_TEST" \
     --dataset_format wsi-bench \
     --epochs 10 \
     --batch_size 1 \

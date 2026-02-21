@@ -202,7 +202,7 @@ DEFAULT_MAX_KNOWLEDGE_TOKENS = 64
 # Default paths (can be overridden by command-line arguments)
 DEFAULT_LLM_PATH = "/home/sandun/nadun/histo_vlm/checkpoints/Qwen2.5-7B-Instruct"
 DEFAULT_SLIDECHAT_CHECKPOINT = "/home/sandun/nadun/vlm_histo_old/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt"
-DEFAULT_DATA_JSON = "/home/nadun/wd/datasets/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
+DEFAULT_DATA_JSON = "/home/sandun/nadun/data/dataset/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
 DEFAULT_STAGE1_OUTPUT = "/home/sandun/nadun/histo_vlm/checkpoints/stage1"
 DEFAULT_STAGE2_OUTPUT = "/home/sandun/nadun/histo_vlm/checkpoints/stage2"
 
@@ -213,10 +213,8 @@ class Stage1Config:
     """Configuration for Stage 1 contrastive alignment training."""
     
     # ---- Data ----
-    train_csv: str = "/home/nadun/wd/data/dataset/report_dataset_train.csv"
-    test_csv: str = "/home/nadun/wd/data/dataset/report_dataset_test.csv"
-    slide_features_dir: str = "/home/nadun/wd/data/slide_features"  # Has train/ and test/ subdirs
-    text_embeddings_dir: str = "/home/nadun/wd/data/text_embeddings"  # Has train/ and test/ subdirs
+    slide_features_dir: str = "/home/sandun/nadun/data/slide_features"  # Has train/ and test/ subdirs
+    text_embeddings_dir: str = "/home/sandun/nadun/data/text_embeddings"  # Has train/ and test/ subdirs
     
     
     # ---- TITAN Model ----
