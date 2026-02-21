@@ -10,6 +10,9 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import Counter
+from head import ConceptHead
+from dataset import ConceptDatasetwithSite
+from utils import load_labels
 
 # Set-up
 LABEL_CSV = "/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_train_with_site.csv"
@@ -26,68 +29,6 @@ RANDOM_SEED = 42
 SITE_EMB_DIM=16
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
-# Dataset
-class WSIDataset(Dataset):
-    def __init__(self, ids, labels, sites, label_to_idx, site_to_idx):
-        self.ids = ids
-        self.labels = labels
-        self.sites = sites
-        self.label_to_idx = label_to_idx
-        self.site_to_idx = site_to_idx
-
-    def __getitem__(self, idx):
-        tcga_id = self.ids[idx]
-        emb_path = os.path.join(EMBEDDING_DIR, f"{tcga_id}.h5")
-
-        with h5py.File(emb_path, 'r') as f:
-            embedding = f['features'][:]
-            embedding = (embedding - embedding.mean()) / (embedding.std() + 1e-6)
-
-        label = self.label_to_idx[self.labels[idx]]
-        site_id = self.site_to_idx[self.sites[idx]]
-
-        return (
-            torch.tensor(embedding, dtype=torch.float32),
-            torch.tensor(site_id, dtype=torch.long),
-            label
-        )
-    
-    def __len__(self):
-        return len(self.ids)
-
-# Model
-class LinearClassifier(nn.Module):
-    def __init__(self, emb_dim, num_sites, site_emb_dim, num_classes):
-        super().__init__()
-
-        self.site_emb = nn.Embedding(num_sites, site_emb_dim)
-
-        self.fc = nn.Sequential(
-            nn.Linear(emb_dim + site_emb_dim, 256),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(256, num_classes)
-        )
-
-    def forward(self, x, site_id):
-        site_vec = self.site_emb(site_id)
-        x = torch.cat([x, site_vec], dim=1)
-        return self.fc(x)
-
-
-# Load labels
-def load_labels(csv_path):
-    ids, labels, sites = [], [], []
-
-    with open(csv_path, "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            ids.append(row["tcga_id"])
-            labels.append(row["final_class"])
-            sites.append(row["primary_site"])   # or organ column
-
-    return ids, labels, sites
 
 # Training 
 def train():
@@ -135,6 +76,7 @@ def train():
     print(f"Number of classes: {len(unique_labels)}")
     print(f"Number of sites: {len(unique_sites)}")
 
+    # Train val split
     X_train, X_val, y_train, y_val, sites_train, sites_val = train_test_split(
         ids, labels, sites, test_size=VAL_SPLIT, random_state=RANDOM_SEED, stratify=labels
     )
@@ -143,13 +85,14 @@ def train():
     print(f"Validation samples: {len(X_val)}")
     print(f"Device: {device}\n")
 
-    train_ds = WSIDataset(X_train, y_train, sites_train, label_to_idx, site_to_idx)
-    val_ds = WSIDataset(X_val, y_val, sites_val, label_to_idx, site_to_idx)
+    # Create dataloaders
+    train_ds = ConceptDatasetwithSite(X_train, y_train, sites_train, label_to_idx, site_to_idx)
+    val_ds = ConceptDatasetwithSite(X_val, y_val, sites_val, label_to_idx, site_to_idx)
 
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE)
 
-    # Class weights
+    # Class weights calculation
     train_label_counts = Counter(y_train)
     num_classes = len(unique_labels)
     total_samples = len(y_train)
@@ -166,21 +109,23 @@ def train():
     # Infer embedding dim
     with h5py.File(os.path.join(EMBEDDING_DIR, f"{ids[0]}.h5"), 'r') as f:
         sample_emb = f['features'][:]
-    model = LinearClassifier(sample_emb.shape[0], len(unique_sites), SITE_EMB_DIM, len(unique_labels)).to(device)
+    model = ConceptHead(sample_emb.shape[0], len(unique_sites), SITE_EMB_DIM, len(unique_labels)).to(device)
 
+    # Set optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
     criterion = nn.CrossEntropyLoss(
         weight=class_weights,
         label_smoothing=0.05
     )
 
+    # Set LR scheduler
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=EPOCHS
     )
 
+    # History 
     train_losses, val_losses = [], []
-
     best_val_acc = 0.0
     best_epoch = 0
     
@@ -267,11 +212,6 @@ def train():
     plt.close()
 
     print("Training complete.")
-    print(f"Saved final model to {OUTPUT_PREFIX}_final.pt")
-    print(f"Saved best model to {OUTPUT_PREFIX}_best.pt")
-    print(f"Saved metrics to {OUTPUT_PREFIX}_metrics.txt")
-    print(f"Saved loss plot to {OUTPUT_PREFIX}_loss.png")
-
 
 # Run script
 if __name__ == "__main__":
