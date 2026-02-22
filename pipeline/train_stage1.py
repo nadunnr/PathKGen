@@ -242,18 +242,22 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
                 if hasattr(model.llm, 'gradient_checkpointing_disable'):
                     model.llm.gradient_checkpointing_disable()
                 
-                # Get knowledge text if available
+                # Get knowledge text and question if available
                 knowledge_text = None
+                question_text = None
                 if 'knowledge_texts' in batch and args.use_knowledge_guidance:
                     knowledge_text = batch['knowledge_texts'][i]
+                if 'questions' in batch:
+                    question_text = batch['questions'][i]
                 
                 pred_text = model.generate(
                     visual_features=single_visual,
-                    prompt=None,  # Let model auto-select based on knowledge_text
+                    prompt=None,
+                    question=question_text,
                     knowledge_text=knowledge_text,
                     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
-                    temperature=0.0,  # Greedy decoding for evaluation (SOTA standard)
-                    top_p=1.0         # No nucleus sampling for deterministic output
+                    temperature=0.0,
+                    top_p=1.0
                 )
                 all_predictions.append(pred_text)
                 
@@ -324,8 +328,7 @@ def evaluate_best_model(checkpoint_path, args, device):
     data_collator = VLMDataCollator(
         tokenizer=tokenizer,
         max_length=args.max_length,
-        use_knowledge_guidance=args.use_knowledge_guidance,
-        max_knowledge_tokens=args.max_knowledge_tokens
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     # Create validation dataloader
@@ -477,8 +480,7 @@ def main():
         tokenizer=tokenizer,
         dataset_format=args.dataset_format,
         max_length=args.max_length,
-        use_knowledge_guidance=args.use_knowledge_guidance,
-        max_knowledge_tokens=args.max_knowledge_tokens
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     # Create dataloaders

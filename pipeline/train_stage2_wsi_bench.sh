@@ -15,6 +15,9 @@ TEST_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test_Report.json"
 KNOWLEDGE_TRAIN_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
 KNOWLEDGE_TEST_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
 
+DEFAULT_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
+UMLS_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"
+
 # Configuration
 OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage2_wsi_bench_knowledge"
 
@@ -24,6 +27,7 @@ STAGE1_CHECKPOINT="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench_knowled
 python train_stage2.py \
     --train_json "$KNOWLEDGE_TRAIN_JSON" \
     --test_json "$KNOWLEDGE_TEST_JSON" \
+    --llm_path "$UMLS_LLM_PATH" \
     --dataset_format wsi-bench \
     --stage1_checkpoint "$STAGE1_CHECKPOINT" \
     --compute_metrics_during_training \

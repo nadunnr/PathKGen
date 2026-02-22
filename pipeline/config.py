@@ -93,7 +93,7 @@ GENERATION_PROMPT_NO_KNOWLEDGE = """<|im_start|>system
 You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
-Analyze the whole slide histopathology image shown above and provide a concise single-paragraph pathology diagnosis.<|im_end|>
+{question}<|im_end|>
 <|im_start|>assistant
 """
 
@@ -106,7 +106,7 @@ Generic knowledge regarding histology type (97.52% accurate). The site is exact.
 {knowledge}
 Use to help, but verify visually.
 
-Generate a concise single-paragraph pathology diagnosis.<|im_end|>
+{question}<|im_end|>
 <|im_start|>assistant
 """
 
@@ -198,7 +198,7 @@ DEFAULT_USE_KNOWLEDGE_GUIDANCE = False
 
 # Default paths (can be overridden by command-line arguments)
 DEFAULT_LLM_PATH = "/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
-UMLS_LLM_PATH    = "/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"  # Medical-domain fine-tuned
+UMLS_LLM_PATH    = "/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"  # Medical-domain-fine-tuned
 DEFAULT_SLIDECHAT_CHECKPOINT = "/home/nadun/wd/vlm_histo/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt"
 DEFAULT_DATA_JSON = "/home/nadun/wd/datasets/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
 DEFAULT_STAGE1_OUTPUT = "/home/nadun/wd/vlm_histo/checkpoints/stage1"

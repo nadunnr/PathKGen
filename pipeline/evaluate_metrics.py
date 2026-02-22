@@ -96,6 +96,10 @@ def parse_args():
     parser.add_argument("--device", type=str, default=None,
                        help="Device to use (default: cuda if available)")
     
+    # Knowledge guidance
+    parser.add_argument("--use_knowledge_guidance", action="store_true",
+                       help="Enable knowledge graph guidance for report generation")
+    
     return parser.parse_args()
 
 
@@ -144,14 +148,18 @@ def validate(model, dataloader, device, tokenizer, args):
             torch.cuda.empty_cache()
             
             # Generate prediction
-            # Get knowledge text if available
+            # Get knowledge text and question if available
             knowledge_text = None
+            question_text = None
             if 'knowledge_texts' in batch:
                 knowledge_text = batch['knowledge_texts'][i]
+            if 'questions' in batch:
+                question_text = batch['questions'][i]
             
             pred_text = model.generate(
                 visual_features=single_visual,
-                prompt=None,  # Let model auto-select based on knowledge_text
+                prompt=None,
+                question=question_text,
                 knowledge_text=knowledge_text,
                 max_new_tokens=args.max_new_tokens,
                 temperature=args.temperature,
@@ -219,7 +227,8 @@ def main():
         json_path=args.data_json,
         dataset_format=args.dataset_format,
         split=val_split,
-        feature_key=args.feature_key
+        feature_key=args.feature_key,
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     print(f"  Loaded {len(val_dataset)} samples from '{args.split if val_split else 'pre-split file'}' split")
     
@@ -228,7 +237,8 @@ def main():
     data_collator = VLMDataCollator(
         tokenizer=tokenizer,
         dataset_format=args.dataset_format,
-        max_length=args.max_length
+        max_length=args.max_length,
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     # Create validation dataloader

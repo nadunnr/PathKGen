@@ -27,8 +27,8 @@ from pathlib import Path
 # Local imports
 from model import VisionLanguageModel
 from dataset import WSI_Report_Dataset
-from config import (GENERATION_PROMPT, DEFAULT_LLM_PATH, 
-                    DEFAULT_SLIDECHAT_CHECKPOINT, DEFAULT_VISUAL_DIM,
+from config import (GENERATION_PROMPT_NO_KNOWLEDGE, GENERATION_PROMPT_WITH_KNOWLEDGE,
+                    DEFAULT_LLM_PATH, DEFAULT_SLIDECHAT_CHECKPOINT, DEFAULT_VISUAL_DIM,
                     DEFAULT_NUM_VISUAL_TOKENS, INFERENCE_MAX_NEW_TOKENS,
                     DEFAULT_TEMPERATURE, DEFAULT_TOP_P, 
                     DEFAULT_REPETITION_PENALTY)
@@ -55,20 +55,22 @@ def parse_args():
     parser.add_argument("--skip_slidechat_init", action="store_true",
                        help="Skip loading SlideChat weights (use this for inference with trained checkpoints)")
     
-    # Input arguments (either single slide or dataset)
+    # Dataset arguments
     parser.add_argument("--feature_path", type=str, default=None,
                        help="Path to single H5 feature file")
-    parser.add_argument("--feature_key", type=str, default="features",
+    parser.add_argument("--feature_key", type=str, default="tokens",
                        help="Key in H5 file for features")
     parser.add_argument("--data_json", type=str, default=None,
                        help="Path to dataset JSON for batch inference")
+    parser.add_argument("--dataset_format", type=str, default="wsi-bench",
+                       choices=["histgen", "wsi-bench"],
+                       help="Dataset format")
     parser.add_argument("--split", type=str, default="test",
-                       help="Dataset split to use (if using data_json)")
+                       help="Dataset split to use (histgen only)")
+    parser.add_argument("--use_knowledge_guidance", action="store_true",
+                       help="Enable knowledge graph guidance for report generation")
     
     # Generation arguments
-    parser.add_argument("--prompt", type=str,
-                       default=GENERATION_PROMPT,
-                       help="Prompt template")
     parser.add_argument("--max_new_tokens", type=int, default=INFERENCE_MAX_NEW_TOKENS,
                        help="Maximum tokens to generate")
     parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE,
@@ -134,13 +136,17 @@ def single_inference(args, model, device):
 def batch_inference(args, model, device):
     """Run inference on dataset split."""
     print(f"Loading dataset from: {args.data_json}")
+    
+    split = None if args.dataset_format == 'wsi-bench' else args.split
     dataset = WSI_Report_Dataset(
         json_path=args.data_json,
-        split=args.split,
-        feature_key=args.feature_key
+        dataset_format=args.dataset_format,
+        split=split,
+        feature_key=args.feature_key,
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
-    print(f"Processing {len(dataset)} slides from '{args.split}' split...")
+    print(f"Processing {len(dataset)} slides...")
     
     results = []
 
@@ -151,12 +157,16 @@ def batch_inference(args, model, device):
         sample = dataset[i]
         slide_id = sample['id']
         features = sample['slide_embedding']
-        ground_truth = sample.get('report', '')
+        ground_truth = sample.get('answer', sample.get('report', ''))
+        question = sample.get('question', None)
+        knowledge_text = sample.get('knowledge_text', None) if args.use_knowledge_guidance else None
         
         # Generate report
         generated_report = model.generate(
             visual_features=features.to(device),
-            prompt=args.prompt,
+            prompt=None,
+            question=question,
+            knowledge_text=knowledge_text,
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
             top_p=args.top_p,
@@ -166,6 +176,7 @@ def batch_inference(args, model, device):
         result = {
             'id': slide_id,
             'organ': sample.get('organ', 'unknown'),
+            'question': question,
             'generated_report': generated_report,
             'ground_truth': ground_truth
         }
@@ -177,6 +188,8 @@ def batch_inference(args, model, device):
             with open(report_path, 'w') as f:
                 f.write(f"Slide ID: {slide_id}\n")
                 f.write(f"Organ: {sample.get('organ', 'unknown')}\n")
+                if question:
+                    f.write(f"Question: {question}\n")
                 f.write("\n" + "="*60 + "\n")
                 f.write("Generated Report:\n")
                 f.write("="*60 + "\n")
