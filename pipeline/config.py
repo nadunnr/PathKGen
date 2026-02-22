@@ -30,13 +30,13 @@ Please analyze this whole slide image and provide a detailed diagnostic report d
 
 # Training prompt with knowledge guidance (HistGen format)
 TRAINING_PROMPT_WITH_KNOWLEDGE = """<|im_start|>system
-You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.
-
-Generic knowledge regarding histology type (96.5%_accurate). The site is exact.
-{knowledge}
-Use to help, but verify visually.<|im_end|>
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
+Generic knowledge regarding histology type (96.5% accurate). The site is exact.
+{knowledge}
+Use to help, but verify visually.
+
 Please analyze this whole slide image and provide a detailed diagnostic report describing the key histopathological features and diagnosis.<|im_end|>
 <|im_start|>assistant
 {report}<|im_end|>"""
@@ -56,13 +56,13 @@ You are a pathology assistant specialized in analyzing whole slide images of tis
 
 # WSI-Bench with knowledge guidance
 TRAINING_PROMPT_WSI_BENCH_KNOWLEDGE = """<|im_start|>system
-You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.
-
-Generic knowledge regarding histology type (96.5% accurate). The site is exact.
-{knowledge}
-Use to help, but verify visually.<|im_end|>
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
+Generic knowledge regarding histology type (97.52% accurate). The site is exact.
+{knowledge}
+Use to help, but verify visually.
+
 {question}<|im_end|>
 <|im_start|>assistant
 {answer}<|im_end|>"""
@@ -72,8 +72,8 @@ Use to help, but verify visually.<|im_end|>
 # ============================================================================
 
 # WSI-Bench dataset paths (pre-split into train/test)
-WSI_BENCH_TRAIN = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-temp_Report_split0.1_train.json"
-WSI_BENCH_TEST = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train-temp_Report_split0.1_test.json"
+WSI_BENCH_TRAIN = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
+WSI_BENCH_TEST = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
 
 # WSI-Bench dataset paths WITH KNOWLEDGE
 WSI_BENCH_TRAIN_KNOWLEDGE = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train_Report_knowledge.json"
@@ -90,7 +90,7 @@ HISTGEN_DATASET = "/home/nadun/wd/datasets/WSIBench/processed/histgen_dataset.js
 
 # Without knowledge guidance
 GENERATION_PROMPT_NO_KNOWLEDGE = """<|im_start|>system
-You are an expert pathology AI assistant specialized in analyzing whole slide images (WSI) from histopathology specimens. You generate accurate, concise diagnostic reports based on visual analysis.<|im_end|>
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
 Analyze the whole slide histopathology image shown above and provide a concise single-paragraph pathology diagnosis.<|im_end|>
@@ -99,11 +99,10 @@ Analyze the whole slide histopathology image shown above and provide a concise s
 
 # With knowledge guidance (includes {knowledge} placeholder)
 GENERATION_PROMPT_WITH_KNOWLEDGE = """<|im_start|>system
-You are an expert pathology AI assistant specialized in analyzing whole slide images (WSI) from histopathology specimens. You integrate medical knowledge with visual analysis to generate accurate, concise diagnostic reports.<|im_end|>
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
-
-Generic knowledge regarding histology type (96.5% accurate). The site is exact.
+Generic knowledge regarding histology type (97.52% accurate). The site is exact.
 {knowledge}
 Use to help, but verify visually.
 
@@ -193,14 +192,13 @@ DEFAULT_REPETITION_PENALTY = 1.2
 
 # Knowledge guidance settings
 DEFAULT_USE_KNOWLEDGE_GUIDANCE = False
-DEFAULT_MAX_KNOWLEDGE_TOKENS = 64
-
 # ============================================================================
 # PATH CONFIGURATION
 # ============================================================================
 
 # Default paths (can be overridden by command-line arguments)
 DEFAULT_LLM_PATH = "/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
+UMLS_LLM_PATH    = "/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"  # Medical-domain fine-tuned
 DEFAULT_SLIDECHAT_CHECKPOINT = "/home/nadun/wd/vlm_histo/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt"
 DEFAULT_DATA_JSON = "/home/nadun/wd/datasets/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
 DEFAULT_STAGE1_OUTPUT = "/home/nadun/wd/vlm_histo/checkpoints/stage1"
