@@ -9,7 +9,7 @@ import json
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from graphs import Neo4jQuery
 
-TOP_N = 150
+TOP_N = 10
 
 def get_top_n_cuis(all_cuis, n):
     cui_counter = Counter(all_cuis)
@@ -36,28 +36,33 @@ if __name__ == "__main__":
         top_cuis_data = {}
 
     for json_file in os.listdir(histology_jsons):
-        all_cuis = []
-        
-        if json_file.endswith(".json"):
-            histology_name = json_file.replace(".json", "")
-            print(histology_name)
+        if not json_file.endswith(".json"):
+            continue
 
-            with open(os.path.join(histology_jsons, json_file), "r") as f:
-                data = json.load(f)
-            for item in data:
-                all_cuis.extend(item["cuis"])
+        histology_name = json_file.replace(".json", "")
+        print(histology_name)
+
+        with open(os.path.join(histology_jsons, json_file), "r") as f:
+            data = json.load(f)
+
+        all_cuis = []
+        for item in data:
+            all_cuis.extend(item["cuis"])
 
         top_n_cuis = get_top_n_cuis(all_cuis, TOP_N)
 
-        top_cuis_names = []
-        for cui in top_n_cuis:
-            top_cuis_names.append(neo4j_query.get_entity_by_cui(cui)['name'])
-        # print(top_n_cuis)
-        # print(top_cuis_names)
+        # Initialize entry for this histology
+        top_cuis_data[histology_name] = {}
 
+        for rank, cui in enumerate(top_n_cuis):
+            entity = neo4j_query.get_entity_by_cui(cui)
+            top_cuis_data[histology_name][rank+1] = {
+                "cui": cui,
+                "name": entity['name'],
+                "semantic_type_tui": entity['tui'],
+                "semantic_type_name": entity['semantic_type']
+            }
         
-        # Add entry to dictionary
-        top_cuis_data[histology_name] = {"cuis": top_n_cuis, "names": top_cuis_names}
 
     # Create directory if it doesn't exist
     os.makedirs(os.path.dirname(top_cuis_json), exist_ok=True)
@@ -66,7 +71,29 @@ if __name__ == "__main__":
         json.dump(top_cuis_data, f, indent=2)
 
     print(f"Saved top {TOP_N} CUIs to {top_cuis_json}")
-            
 
+    # Write semantic-type summary log file (ranked by count per histology)
+    log_path = top_cuis_json.replace(".json", "_by_semtype.log")
+    from collections import defaultdict
+    with open(log_path, "w") as log_f:
+        for histology_name, ranked_entries in sorted(top_cuis_data.items()):
+            log_f.write(f"{'='*60}\n")
+            log_f.write(f"  {histology_name}\n")
+            log_f.write(f"{'='*60}\n")
 
-    
+            # Count occurrences per semantic type
+            semtype_counts = defaultdict(lambda: {"count": 0, "tui": ""})
+            for entry in ranked_entries.values():
+                st = entry["semantic_type_name"]
+                semtype_counts[st]["count"] += 1
+                semtype_counts[st]["tui"] = entry["semantic_type_tui"]
+
+            # Sort by count descending
+            sorted_semtypes = sorted(semtype_counts.items(), key=lambda x: -x[1]["count"])
+
+            for rank_st, (semtype, info) in enumerate(sorted_semtypes, 1):
+                log_f.write(f"  {rank_st:>2}. [{info['tui']}] {semtype}  ({info['count']})\n")
+
+            log_f.write("\n")
+
+    print(f"Saved semantic-type log to {log_path}")

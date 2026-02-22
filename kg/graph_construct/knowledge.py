@@ -1,7 +1,7 @@
 import json
 
-descriptions_path = 'descriptions.json'
-morphs_path = 'top_cuis.json'
+descriptions_path = '/home/nadun/wd/datasets/wsi_bench/kg_data/descriptions.json'
+morphs_path = '/home/nadun/wd/datasets/wsi_bench/kg_data/top_cuis/top_10_cuis.json'
 
 with open(descriptions_path) as f:
     descriptions = json.load(f)
@@ -23,7 +23,7 @@ for key in descriptions:
     data[histology] = text
 
 #save this as a json file
-output_path = 'histology_descriptions_with_features.json'
+output_path = '/home/nadun/wd/datasets/wsi_bench/kg_data/histology_descriptions_with_features.json'
 with open(output_path, 'w') as f:
     json.dump(data, f, indent=2)
 print(f"Saved histology descriptions with features to {output_path}")
