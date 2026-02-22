@@ -9,7 +9,7 @@ import json
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from graphs import Neo4jQuery
 
-TOP_N = 10
+TOP_N = 150
 
 def get_top_n_cuis(all_cuis, n):
     cui_counter = Counter(all_cuis)
@@ -27,6 +27,7 @@ if __name__ == "__main__":
 
     histology_jsons = "/home/nadun/wd/datasets/wsi_bench/kg_data/cui_jsons"
     top_cuis_json = f"/home/nadun/wd/datasets/wsi_bench/kg_data/top_cuis/top_{TOP_N}_cuis.json"
+    top_cuis_names_json = f"/home/nadun/wd/datasets/wsi_bench/kg_data/top_cuis/top_{TOP_N}_cuis_names.json"
 
     # Load existing data or create new dict
     if os.path.exists(top_cuis_json):
@@ -34,6 +35,12 @@ if __name__ == "__main__":
             top_cuis_data = json.load(f)
     else:
         top_cuis_data = {}
+
+    if os.path.exists(top_cuis_names_json):
+        with open(top_cuis_names_json, "r") as f:
+            top_cuis_names_data = json.load(f)
+    else:
+        top_cuis_names_data = {}
 
     for json_file in os.listdir(histology_jsons):
         if not json_file.endswith(".json"):
@@ -53,22 +60,32 @@ if __name__ == "__main__":
 
         # Initialize entry for this histology
         top_cuis_data[histology_name] = {}
+        top_cui_names = []
 
         for rank, cui in enumerate(top_n_cuis):
             entity = neo4j_query.get_entity_by_cui(cui)
+
+            top_cui_names.append(entity['name'])
             top_cuis_data[histology_name][rank+1] = {
                 "cui": cui,
                 "name": entity['name'],
                 "semantic_type_tui": entity['tui'],
                 "semantic_type_name": entity['semantic_type']
             }
-        
+
+        top_cuis_names_data[histology_name] = top_cui_names
+
+    
 
     # Create directory if it doesn't exist
     os.makedirs(os.path.dirname(top_cuis_json), exist_ok=True)
+    os.makedirs(os.path.dirname(top_cuis_names_json), exist_ok=True)
+    
     # Save the complete dictionary as valid JSON
     with open(top_cuis_json, "w") as f:
         json.dump(top_cuis_data, f, indent=2)
+    with open(top_cuis_names_json, "w") as f:
+        json.dump(top_cuis_names_data, f, indent=2)
 
     print(f"Saved top {TOP_N} CUIs to {top_cuis_json}")
 
