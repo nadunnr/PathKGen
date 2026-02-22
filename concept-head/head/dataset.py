@@ -1,19 +1,19 @@
-import os
 import h5py
 import torch
 import torch.nn as nn
+from torch.utils.data import Dataset
 
 class ConceptDatasetwithSite(Dataset):
-    def __init__(self, ids, labels, sites, label_to_idx, site_to_idx):
+    def __init__(self, ids, labels, sites, feature_paths, label_to_idx, site_to_idx):
         self.ids = ids
         self.labels = labels
         self.sites = sites
+        self.feature_paths = feature_paths
         self.label_to_idx = label_to_idx
         self.site_to_idx = site_to_idx
 
     def __getitem__(self, idx):
-        tcga_id = self.ids[idx]
-        emb_path = os.path.join(EMBEDDING_DIR, f"{tcga_id}.h5")
+        emb_path = self.feature_paths[idx]
 
         with h5py.File(emb_path, 'r') as f:
             embedding = f['features'][:]

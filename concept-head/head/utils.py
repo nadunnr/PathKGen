@@ -1,14 +1,16 @@
-import csv
+import json
 
-# Load labels
-def load_labels(csv_path):
-    ids, labels, sites = [], [], []
+# Load labels from JSON file
+def load_labels(json_path):
+    ids, labels, sites, feature_paths = [], [], [], []
 
-    with open(csv_path, "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            ids.append(row["tcga_id"])
-            labels.append(row["final_class"])
-            sites.append(row["primary_site"])   # or organ column
+    with open(json_path, "r") as f:
+        data = json.load(f)
 
-    return ids, labels, sites
+    for entry in data:
+        ids.append(entry["tcga_id"])
+        labels.append(entry["histology"])
+        sites.append(entry["primary_site"])
+        feature_paths.append(entry.get("feature_path", None))
+
+    return ids, labels, sites, feature_paths
