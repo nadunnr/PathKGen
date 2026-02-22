@@ -476,17 +476,22 @@ class VisionLanguageModel(nn.Module):
             pad_token_id=self.tokenizer.pad_token_id
         )
         
-        # Decode (skip special tokens)
+        # Decode output tokens.
+        # NOTE: when using inputs_embeds, llm.generate() returns ONLY the newly
+        # generated tokens (not the prompt), so the output is already the
+        # assistant response only. skip_special_tokens removes <|im_start|> etc.
         generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        
-        # Clean up the output - remove the prompt part
-        # The model might include the system/user parts, we only want the assistant response
+
+        # Safety strip: in case the model echoes any ChatML wrapper despite the
+        # above (e.g. when called via input_ids instead of inputs_embeds),
+        # extract only the assistant portion.
         if "<|im_start|>assistant" in generated_text:
             generated_text = generated_text.split("<|im_start|>assistant")[-1]
-        
-        generated_text = generated_text.strip()
-        
-        return generated_text
+        elif "<|im_end|>" in generated_text:
+            # Strip any trailing end marker
+            generated_text = generated_text.split("<|im_end|>")[0]
+
+        return generated_text.strip()
     
     def to(self, device):
         """

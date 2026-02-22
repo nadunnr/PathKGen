@@ -76,8 +76,9 @@ WSI_BENCH_TRAIN = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_wi
 WSI_BENCH_TEST = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
 
 # WSI-Bench dataset paths WITH KNOWLEDGE
-WSI_BENCH_TRAIN_KNOWLEDGE = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train_Report_knowledge.json"
-WSI_BENCH_TEST_KNOWLEDGE = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test_Report_knowledge.json"
+WSI_BENCH_TRAIN_KNOWLEDGE = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
+WSI_BENCH_TEST_KNOWLEDGE = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+
 
 # HistGen dataset path (contains splits internally)
 HISTGEN_DATASET = "/home/nadun/wd/datasets/WSIBench/processed/histgen_dataset.json"  # Example path
@@ -121,46 +122,42 @@ GENERATION_PROMPT = GENERATION_PROMPT_NO_KNOWLEDGE
 def extract_report_from_labels(tokenizer, label_ids):
     """
     Extract the ground truth report text from tokenized labels.
-    
-    The labels contain the full training prompt in ChatML format:
-    <|im_start|>system...  
-    <|im_start|>user...
-    <|im_start|>assistant
-    REPORT_TEXT<|im_end|>
-    
-    This function extracts just the REPORT_TEXT part for NLU metric evaluation.
-    
+
+    After label masking in VLMDataCollator, label_ids passed here contains
+    ONLY the answer (T-answer) tokens because the caller filters:
+        label_ids = labels[i][labels[i] != -100]
+    Everything before <|im_start|>assistant is masked to -100, so the
+    primary decode path is simply a clean skip_special_tokens decode.
+
     Args:
         tokenizer: HuggingFace tokenizer
-        label_ids: Tensor of label token IDs (with -100 already filtered out)
-        
+        label_ids: 1-D Tensor of non-masked label token IDs (-100 already removed)
+
     Returns:
-        str: The ground truth report text
+        str: Clean ground truth report text (T-answer only)
     """
-    # Decode full text (keep special tokens to find markers)
+    # Safety net: decode keeping special tokens so we can detect ChatML markers.
+    # This handles the edge case where label masking wasn't applied and the full
+    # prompt survives. We look for <|im_start|>assistant and extract only what
+    # follows it (up to the closing <|im_end|>).
     full_text = tokenizer.decode(label_ids, skip_special_tokens=False)
-    
-    # Find assistant response section
+
     assistant_marker = "<|im_start|>assistant"
     end_marker = "<|im_end|>"
-    
+
     if assistant_marker in full_text:
-        # Split at assistant marker and take everything after
-        parts = full_text.split(assistant_marker, 1)
-        if len(parts) > 1:
-            after_assistant = parts[1]
-            
-            # Find the end marker
-            if end_marker in after_assistant:
-                report = after_assistant.split(end_marker, 1)[0]
-                return report.strip()
-            else:
-                # No end marker found, return everything after assistant
-                return after_assistant.strip()
-    
-    # Fallback: decode without special tokens and return
-    # This handles old format or if markers not found
+        # Full prompt is present — extract the assistant portion only
+        after_assistant = full_text.split(assistant_marker, 1)[-1]
+        if end_marker in after_assistant:
+            report = after_assistant.split(end_marker, 1)[0]
+        else:
+            report = after_assistant
+        return report.strip()
+
+    # Primary path (normal case): label masking already removed the prompt.
+    # skip_special_tokens=True strips any remaining <|im_end|> cleanly.
     return tokenizer.decode(label_ids, skip_special_tokens=True).strip()
+
 
 
 # ============================================================================
