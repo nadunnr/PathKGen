@@ -11,7 +11,7 @@ from tqdm import tqdm
 from collections import Counter
 from head import ConceptHead
 from dataset import ConceptDatasetwithSite
-from utils import load_labels
+from utils import load_labels, save_vocabs, save_distribution
 
 # Set-up
 LABEL_JSON = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
@@ -42,6 +42,10 @@ def train():
     # Site vocab
     unique_sites = sorted(set(sites))
     site_to_idx = {s: i for i, s in enumerate(unique_sites)}
+
+    # Save vocabs to json
+    save_vocabs(label_to_idx, site_to_idx)
+    save_distribution(labels, sites)
     
     # Print dataset statistics
     print(f"\n{'='*60}")

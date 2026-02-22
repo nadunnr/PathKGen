@@ -86,7 +86,7 @@ def inference():
     
     # Create dataset
     dataset    = ConceptDatasetwithSite(ids, gt_labels, sites, feature_paths, label_to_idx, site_to_idx)
-    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
+    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
     
     # Load model
     with h5py.File(os.path.join(EMBEDDING_DIR, f"{ids[0]}.h5"), 'r') as f:
