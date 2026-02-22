@@ -63,8 +63,9 @@ def parse_args():
     parser.add_argument("--slidechat_checkpoint", type=str,
                        default=DEFAULT_SLIDECHAT_CHECKPOINT,
                        help="Path to SlideChat weights")
-    parser.add_argument("--stage1_checkpoint", type=str, required=True,
-                       help="Path to Stage 1 checkpoint (for projection weights)")
+    parser.add_argument("--stage1_checkpoint", type=str, default=None,
+                       help="Path to Stage 1 checkpoint (for projection weights). "
+                            "Required unless --init_from is provided.")
     parser.add_argument("--visual_dim", type=int, default=DEFAULT_VISUAL_DIM,
                        help="Dimension of slide features")
     parser.add_argument("--num_visual_tokens", type=int, default=DEFAULT_NUM_VISUAL_TOKENS,
@@ -111,7 +112,11 @@ def parse_args():
     parser.add_argument("--save_every", type=int, default=1,
                        help="Save checkpoint every N epochs")
     parser.add_argument("--resume_from", type=str, default=None,
-                       help="Resume training from Stage 2 checkpoint")
+                       help="Resume training from Stage 2 checkpoint (restores epoch + optimizer)")
+    parser.add_argument("--init_from", type=str, default=None,
+                       help="Warm-start: load projection + LoRA weights from a previous Stage 2 checkpoint. "
+                            "Epoch resets to 0, optimizer is fresh. Skips --stage1_checkpoint load. "
+                            "Useful for rapid prototyping with new data/hyperparams.")
     
     # Early stopping
     parser.add_argument("--early_stopping", action="store_true",
@@ -130,8 +135,13 @@ def parse_args():
                        help="Random seed")
     parser.add_argument("--log_every", type=int, default=10,
                        help="Log every N steps")
+    parser.add_argument("--output_results_dir", type=str,
+                       default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "results"),
+                       help="Directory to save per-epoch prediction/reference JSONL files")
+    
     
     return parser.parse_args()
+
 
 
 def set_seed(seed: int):
@@ -310,12 +320,26 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
         pbar.set_postfix({'val_loss': f'{avg_batch_loss:.4f}'})
     
     avg_loss = total_loss / num_samples
-    
+
     metrics = {}
     if len(all_predictions) > 0:
         from metrics import compute_metrics as calc_metrics
         metrics = calc_metrics(all_predictions, all_references)
-    
+
+        # Save predictions vs references for inspection
+        results_dir = args.output_results_dir
+        os.makedirs(results_dir, exist_ok=True)
+        results_path = os.path.join(results_dir, f'stage2_val_epoch{epoch+1}.jsonl')
+        with open(results_path, 'w') as f:
+            for i, (pred, ref) in enumerate(zip(all_predictions, all_references)):
+                import json
+                f.write(json.dumps({
+                    'idx': i,
+                    'prediction': pred,
+                    'reference': ref
+                }) + '\n')
+        print(f"  [Results] Saved {len(all_predictions)} prediction/reference pairs → {results_path}")
+
     return avg_loss, metrics
 
 
@@ -555,15 +579,34 @@ def main():
         device=device
     )
     
-    # Load Stage 1 projection weights
-    print(f"\nLoading Stage 1 projection weights from: {args.stage1_checkpoint}")
-    checkpoint = torch.load(args.stage1_checkpoint, map_location=device)
-    model.projection.load_state_dict(checkpoint['projection_state_dict'])
-    print("✓ Projection weights loaded from Stage 1")
-    
-    # Free checkpoint memory immediately
-    del checkpoint
-    torch.cuda.empty_cache()
+    # ── Load initial weights for Stage 2 ────────────────────────────────
+    if args.init_from is not None:
+        # Warm-start from a previous Stage 2 checkpoint (projection + LoRA)
+        print(f"\n[Warm-start] Loading Stage 2 weights from: {args.init_from}")
+        ckpt = torch.load(args.init_from, map_location='cpu')
+        if 'projection_state_dict' in ckpt:
+            model.projection.load_state_dict(ckpt['projection_state_dict'])
+            print("  ✓ Projection weights loaded")
+        else:
+            raise KeyError(f"'projection_state_dict' not found. Keys: {list(ckpt.keys())}")
+        if 'lora_state_dict' in ckpt:
+            model.llm.load_state_dict(ckpt['lora_state_dict'], strict=False)
+            print("  ✓ LoRA weights loaded")
+        else:
+            print("  ! No 'lora_state_dict' found — LoRA starts from random init")
+        print("  [Epoch resets to 0, optimizer is fresh]")
+        del ckpt
+        torch.cuda.empty_cache()
+    elif args.stage1_checkpoint is not None:
+        # Standard: load only projection from Stage 1 checkpoint
+        print(f"\nLoading Stage 1 projection weights from: {args.stage1_checkpoint}")
+        checkpoint = torch.load(args.stage1_checkpoint, map_location=device)
+        model.projection.load_state_dict(checkpoint['projection_state_dict'])
+        print("✓ Projection weights loaded from Stage 1")
+        del checkpoint
+        torch.cuda.empty_cache()
+    else:
+        raise ValueError("Either --stage1_checkpoint or --init_from must be provided.")
     
     total_params, trainable_params = model.count_parameters()
     print(f"\nModel parameters:")

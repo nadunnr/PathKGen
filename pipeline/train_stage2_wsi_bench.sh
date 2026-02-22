@@ -20,6 +20,7 @@ UMLS_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"
 
 # Configuration
 OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage2_wsi_bench_knowledge"
+OUTPUT_RESULTS_DIR="/home/nadun/wd/vlm_histo/results/stage2_wsi_bench_knowledge"
 
 # Configuration
 STAGE1_CHECKPOINT="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench_knowledge/2026-02-20_04-09_vt128_ml768_e10_bs4/best_model.pt"
@@ -30,6 +31,7 @@ python train_stage2.py \
     --llm_path "$UMLS_LLM_PATH" \
     --dataset_format wsi-bench \
     --stage1_checkpoint "$STAGE1_CHECKPOINT" \
+    --output_results_dir "$OUTPUT_RESULTS_DIR" \
     --compute_metrics_during_training \
     --epochs 2\
     --batch_size 4 \
