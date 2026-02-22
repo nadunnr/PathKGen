@@ -192,7 +192,7 @@ class Neo4jLoader:
     
     def update_node_semantic_types(self, csv_file, batch_size=1000):
         """Update existing nodes with semantic types from CSV file"""
-        # Read TUI for each CUI
+        # Read TUI and TUI names for each CUI
         cui_tui_map = {}
         
         with open(csv_file, 'r', encoding='utf-8') as f:
@@ -201,9 +201,10 @@ class Neo4jLoader:
             for row in reader:
                 cui = row.get('cui:ID')
                 tui = row.get('tui', '')
+                tui_name = row.get('semantic_type', '')
                 
                 if cui and tui:
-                    cui_tui_map[cui] = tui
+                    cui_tui_map[cui] = {'tui': tui, 'tui_name': tui_name}
         
         # Now update nodes in batches
         with self.driver.session(database=self.database) as session:
@@ -211,10 +212,11 @@ class Neo4jLoader:
             count = 0
             updated = 0
             
-            for cui, tui in cui_tui_map.items():
+            for cui, tui_data in cui_tui_map.items():
                 batch.append({
                     'cui': cui,
-                    'tui': tui
+                    'tui': tui_data['tui'],
+                    'tui_name': tui_data['tui_name']
                 })
                 count += 1
                 
@@ -232,11 +234,11 @@ class Neo4jLoader:
         print(f"Total processed: {count} CUIs, updated: {updated} nodes")
     
     def _update_semantic_types_batch(self, session, batch):
-        """Update a batch of nodes with TUI codes"""
+        """Update a batch of nodes with TUI codes and semantic type names"""
         result = session.run("""
             UNWIND $batch AS item
             MATCH (c:Concept {cui: item.cui})
-            SET c.tui = item.tui
+            SET c.tui = item.tui, c.tui_name = item.tui_name
             RETURN count(c) as updated
         """, batch=batch)
         return result.single()['updated']
@@ -250,6 +252,6 @@ if __name__ == '__main__':
 
     loader = Neo4jLoader(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
     loader.create_constraints()
-    # loader.update_node_semantic_types('/home/nadun/wd/datasets/UMLS_sql/neo4jdb/v8/semantic_types.csv')
-    loader.update_node_definitions('/home/nadun/wd/vlm_histo/kg/graph_construct/descriptions.json')
+    loader.update_node_semantic_types('/home/nadun/wd/datasets/UMLS_sql/neo4jdb/v8/semantic_types.csv')
+    # loader.update_node_definitions('/home/nadun/wd/vlm_histo/kg/graph_construct/descriptions.json')
     loader.close()
