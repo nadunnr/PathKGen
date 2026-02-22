@@ -87,7 +87,13 @@ def parse_args():
                        help="Output directory for batch reports")
     parser.add_argument("--save_json", action="store_true",
                        help="Save results as JSON (batch mode)")
-    
+
+    # Single-slide options
+    parser.add_argument("--question", type=str, default=None,
+                       help="Question for single-slide inference (WSI-Bench format)")
+    parser.add_argument("--knowledge_text", type=str, default=None,
+                       help="Knowledge text for single-slide inference (if --use_knowledge_guidance)")
+
     # Misc
     parser.add_argument("--batch_size", type=int, default=1,
                        help="Batch size for inference (use 1 for variable generation length)")
@@ -106,24 +112,31 @@ def single_inference(args, model, device):
     """Run inference on a single slide."""
     print(f"Loading features from: {args.feature_path}")
     features = load_slide_features(args.feature_path, args.feature_key)
-    
+
+    # Build question and knowledge for generation
+    question = getattr(args, 'question', None)
+    knowledge_text = args.knowledge_text if args.use_knowledge_guidance else None
+
+
     print("Generating report...")
     report = model.generate(
         visual_features=features.to(device),
-        prompt=args.prompt,
+        prompt=None,
+        question=question,
+        knowledge_text=knowledge_text,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
         top_p=args.top_p,
         repetition_penalty=args.repetition_penalty
     )
-    
+
     # Print to console
     print("\n" + "="*60)
     print("Generated Report:")
     print("="*60)
     print(report)
     print("="*60)
-    
+
     # Save to file if specified
     if args.output_path:
         output_path = Path(args.output_path)
@@ -131,6 +144,8 @@ def single_inference(args, model, device):
         with open(output_path, 'w') as f:
             f.write(report)
         print(f"\n✓ Report saved to: {args.output_path}")
+
+
 
 
 def batch_inference(args, model, device):

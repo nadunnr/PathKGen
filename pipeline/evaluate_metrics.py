@@ -57,8 +57,8 @@ def parse_args():
                        help="Dataset format: 'histgen' (nested dict with splits) or 'wsi-bench' (flat list)")
     parser.add_argument("--split", type=str, default="test",
                        help="Dataset split to evaluate on (default: test). Leave empty for wsi-bench format.")
-    parser.add_argument("--feature_key", type=str, default="features",
-                       help="Key in H5 files for slide features")
+    parser.add_argument("--feature_key", type=str, default="tokens",
+                       help="Key in H5 files for slide features (use 'tokens' for TITAN encoder)")
     
     # Model arguments
     parser.add_argument("--llm_path", type=str, default=DEFAULT_LLM_PATH,
@@ -147,11 +147,10 @@ def validate(model, dataloader, device, tokenizer, args):
             del outputs, single_input, single_mask, single_labels
             torch.cuda.empty_cache()
             
-            # Generate prediction
             # Get knowledge text and question if available
             knowledge_text = None
             question_text = None
-            if 'knowledge_texts' in batch:
+            if 'knowledge_texts' in batch and args.use_knowledge_guidance:
                 knowledge_text = batch['knowledge_texts'][i]
             if 'questions' in batch:
                 question_text = batch['questions'][i]
@@ -212,6 +211,11 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.llm_path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+
+    # CRITICAL: Add image marker tokens (must match model.py and training scripts)
+    from config import IMAGE_START_TOKEN, IMAGE_END_TOKEN
+    special_tokens_dict = {'additional_special_tokens': [IMAGE_START_TOKEN, IMAGE_END_TOKEN]}
+    tokenizer.add_special_tokens(special_tokens_dict)
     
     # Create validation dataset
     print("Loading dataset...")

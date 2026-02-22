@@ -85,10 +85,15 @@ class WSI_Report_Dataset(Dataset):
         
         # Extract question and answer based on dataset format
         if self.has_questions:
-            # WSI-Bench format: has question field
+            # WSI-Bench format: has question field.
+            # Strip legacy <image>\n prefix — image is already embedded via <image_start><image_end>
+            # tokens in the prompt template; including the raw tag would create duplicate garbage tokens.
             question = item['question']
+            if question.startswith('<image>'):
+                question = question[len('<image>'):].lstrip('\n').strip()
             answer = item[self.answer_key]  # 'T-answer'
         else:
+
             # HistGen format: no question field, will use fixed prompt
             question = None
             answer = item[self.answer_key]  # 'report'
@@ -132,71 +137,65 @@ class WSI_Report_Dataset(Dataset):
 
 
 if __name__ == "__main__":
-    
-    # --- Configuration ---
-    json_file = "/home/nadun/wd/datasets/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2_knowledge.json"
+    import sys
+    from config import WSI_BENCH_TRAIN_KNOWLEDGE, WSI_BENCH_TEST_KNOWLEDGE
 
-    print("="*80)
-    print("TESTING DATASET WITHOUT KNOWLEDGE GUIDANCE")
-    print("="*80)
-    try:
-        split = ['train','val']
-        dataset = WSI_Report_Dataset(json_file, split=split, feature_key='tokens', use_knowledge_guidance=False)
+    PASS = "\033[92m\u2713\033[0m"
+    FAIL = "\033[91m\u2717\033[0m"
+    errors = []
 
-        loader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=2)
+    def check(name, condition, detail=""):
+        if condition:
+            print(f"  {PASS} {name}")
+        else:
+            print(f"  {FAIL} {name}" + (f": {detail}" if detail else ""))
+            errors.append(name)
 
-        print(f"Dataset length: {len(dataset)}")
+    for split_name, json_path in [("TRAIN", WSI_BENCH_TRAIN_KNOWLEDGE),
+                                   ("TEST",  WSI_BENCH_TEST_KNOWLEDGE)]:
+        print(f"\n{'=' * 55}")
+        print(f"WSI-Bench Knowledge Dataset - {split_name}: {json_path}")
+        print("=" * 55)
 
-        for batch in loader:
-            slide_embeddings = batch['slide_embedding']
-            reports = batch['report']
-            knowledge_texts = batch['knowledge_text']
-            ids = batch['id']
+        # --- Without knowledge guidance ---
+        ds_nk = WSI_Report_Dataset(json_path, dataset_format='wsi-bench',
+                                   split=None, feature_key='tokens',
+                                   use_knowledge_guidance=False)
+        print(f"\n  Length (no knowledge): {len(ds_nk)}")
+        check("dataset non-empty", len(ds_nk) > 0)
 
-            print(f"Batch IDs: {ids}")
-            print(f"Slide Embeddings Shape: {slide_embeddings.shape}")
-            print(f"Number of Reports in Batch: {len(reports)}")
-            print(f"Reports: {reports[0][:50]}...")
-            print(f"Knowledge texts (should be empty): {knowledge_texts}")
-            break 
+        item = ds_nk[0]
+        print(f"  id            : {item['id']}")
+        print(f"  organ         : {item['organ']}")
+        print(f"  question      : {item['question'][:80]!r}")
+        print(f"  answer (T-ans): {item['answer'][:80]!r}")
+        print(f"  knowledge_text: {repr(item['knowledge_text'])[:60]}")
+        print(f"  embedding shape: {item['slide_embedding'].shape}")
 
-    except Exception as e:
-        print(f"Error loading dataset: {e}")
-        import traceback
-        traceback.print_exc()
+        check("question is non-empty string", isinstance(item['question'], str) and len(item['question']) > 5)
+        check("answer is T-answer (non-empty)", isinstance(item['answer'], str) and len(item['answer']) > 5)
+        check("knowledge_text is empty when guidance=False", item['knowledge_text'] == "")
+        check("slide_embedding is 2D tensor", item['slide_embedding'].ndim == 2)
 
-    print("\n" + "="*80)
-    print("TESTING DATASET WITH KNOWLEDGE GUIDANCE")
-    print("="*80)
-    try:
-        split = 'train'
-        dataset_kg = WSI_Report_Dataset(json_file, split=split, feature_key='features', use_knowledge_guidance=True)
+        # --- With knowledge guidance ---
+        ds_k = WSI_Report_Dataset(json_path, dataset_format='wsi-bench',
+                                  split=None, feature_key='tokens',
+                                  use_knowledge_guidance=True)
+        item_k = ds_k[0]
+        print(f"\n  With knowledge:")
+        print(f"  knowledge_text: {item_k['knowledge_text'][:120]!r}")
+        check("knowledge_text non-empty with guidance=True",
+              isinstance(item_k['knowledge_text'], str) and len(item_k['knowledge_text']) > 10,
+              f"got: {item_k['knowledge_text']!r}")
+        check("knowledge starts with <knowledge>",
+              item_k['knowledge_text'].strip().startswith("<knowledge>"),
+              f"starts with: {item_k['knowledge_text'][:20]!r}")
+        check("T-answer preserved with knowledge", item_k['answer'] == item['answer'])
 
-        # Use num_workers=0 to avoid multiprocessing issues during testing
-        loader_kg = DataLoader(dataset_kg, batch_size=2, shuffle=True, num_workers=0)
-
-        print(f"Dataset length: {len(dataset_kg)}")
-
-        for batch in loader_kg:
-            slide_embeddings = batch['slide_embedding']
-            reports = batch['report']
-            knowledge_texts = batch['knowledge_text']
-            ids = batch['id']
-
-            print(f"\nBatch IDs: {ids}")
-            print(f"Slide Embeddings Shape: {slide_embeddings.shape}")
-            print(f"Number of Reports in Batch: {len(reports)}")
-            print(f"\nReport sample:\n{reports[0][:200]}...")
-            print(f"\nKnowledge text sample (first 500 chars):\n{knowledge_texts[0][:500] if knowledge_texts[0] else '(empty)'}...")
-            break 
-
-        print("\n✓ Knowledge extraction working correctly!")
-
-    except Exception as e:
-        print(f"Error loading dataset with knowledge guidance: {e}")
-        import traceback
-        traceback.print_exc()
-
-
-            
-        
+    print(f"\n{'=' * 55}")
+    if errors:
+        print(f"\033[91mFAILED ({len(errors)}): {errors}\033[0m")
+        sys.exit(1)
+    else:
+        print("\033[92mAll dataset tests passed!\033[0m")
+    print("=" * 55)
