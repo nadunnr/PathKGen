@@ -88,8 +88,8 @@ def link_text_to_umls(text, axis_name):
     return max(best_per_cui.values(), key=lambda x: x["score"])
 
 # Load input JSON
-input_file = "/home/nadun/wd/vlm_histo/kg/wsi-kg/extracted_test.json"
-output_file = "/home/nadun/wd/vlm_histo/kg/wsi-kg/linked_test.json"
+input_file = "/home/nadun/wd/vlm_histo/kg/wsi-kg/extracted_test_temp.json"
+output_file = "/home/nadun/wd/vlm_histo/kg/wsi-kg/linked_test_temp.json"
 
 print(f"Loading data from: {input_file}")
 with open(input_file, 'r', encoding='utf-8') as f:

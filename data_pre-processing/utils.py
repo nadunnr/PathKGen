@@ -1,6 +1,4 @@
-import glob
-import json
-import os 
+import glob, json, os 
 import pandas as pd
 
 
