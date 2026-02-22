@@ -34,7 +34,6 @@ class VLMDataCollator:
         max_length: int = 512,
         padding: str = "longest",
         use_knowledge_guidance: bool = False,
-        max_knowledge_tokens: int = 64
     ):
         """
         Args:
@@ -43,14 +42,12 @@ class VLMDataCollator:
             max_length: Maximum sequence length
             padding: Padding strategy ('longest' or 'max_length')
             use_knowledge_guidance: Whether to use knowledge-guided prompts
-            max_knowledge_tokens: Maximum tokens for knowledge text
         """
         self.tokenizer = tokenizer
         self.dataset_format = dataset_format
         self.max_length = max_length
         self.padding = padding
         self.use_knowledge_guidance = use_knowledge_guidance
-        self.max_knowledge_tokens = max_knowledge_tokens
         
         # Select appropriate prompt template based on dataset format and knowledge guidance
         if dataset_format == 'wsi-bench':
@@ -133,15 +130,40 @@ class VLMDataCollator:
             return_tensors="pt"
         )
 
-        # print("tokenized.keys()", tokenized.keys())
-        # print("tokenized.input_ids.shape", tokenized.input_ids.shape)
-        # print("tokenized.attention_mask.shape", tokenized.attention_mask.shape)
-        # print("tokenized.input_ids", tokenized.input_ids)
-        # print("tokenized.attention_mask", tokenized.attention_mask)
-
-        # Prepare labels (shift will be handled by the model)
-        # Set pad tokens to -100 so they're ignored in loss
+        # Prepare labels for causal LM:
+        # Only the ANSWER tokens should have active labels (standard instruction tuning).
+        # Everything before <|im_start|>assistant (system prompt, knowledge, question)
+        # is masked to -100 so the model learns to USE knowledge, not PREDICT it.
         labels = tokenized['input_ids'].clone()
+
+        # Find the token ids for "<|im_start|>assistant" to locate answer start
+        assistant_marker_ids = self.tokenizer(
+            "<|im_start|>assistant",
+            add_special_tokens=False
+        ).input_ids  # typically 2 tokens: <|im_start|> and "assistant"
+
+        input_ids_np = tokenized['input_ids']
+        for i in range(input_ids_np.shape[0]):
+            seq = input_ids_np[i].tolist()
+            # Find the last occurrence of the assistant marker
+            # (last because the prompt may contain multi-turn examples)
+            marker_pos = -1
+            marker_len = len(assistant_marker_ids)
+            for j in range(len(seq) - marker_len, -1, -1):
+                if seq[j:j + marker_len] == assistant_marker_ids:
+                    marker_pos = j
+                    break
+
+            if marker_pos != -1:
+                # Mask everything up to and including <|im_start|>assistant\n
+                # (+1 for the newline token that follows the marker)
+                mask_until = marker_pos + marker_len
+                labels[i, :mask_until] = -100
+            else:
+                # Fallback: mask everything (should not happen with correct prompts)
+                labels[i, :] = -100
+
+        # Also mask pad tokens
         labels[labels == self.tokenizer.pad_token_id] = -100
         
         # Collect metadata
@@ -161,40 +183,12 @@ class VLMDataCollator:
             knowledge_texts = [item.get('knowledge_text', '') for item in batch]
             result['knowledge_texts'] = knowledge_texts
         
+        # Always include questions for generation (WSI-Bench has per-sample questions)
+        result['questions'] = [item.get('question', '') or '' for item in batch]
+        
         return result
 
 
-class VLMInferenceCollator:
-    """
-    Collator for inference (no labels needed).
-    """
-    
-    def __init__(
-        self,
-        prompt: str = "Generate a detailed pathology report for this whole slide image:\n\n"
-    ):
-        self.prompt = prompt
-    
-    def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Collate batch for inference.
-        
-        Returns:
-            - 'visual_features': [batch, 768]
-            - 'ids': List[str]
-            - 'organs': List[str]
-            - 'prompt': str
-        """
-        visual_features = torch.stack([item['slide_embedding'] for item in batch])
-        ids = [item['id'] for item in batch]
-        organs = [item.get('organ', 'unknown') for item in batch]
-        
-        return {
-            'visual_features': visual_features,
-            'ids': ids,
-            'organs': organs,
-            'prompt': self.prompt
-        }
 
 if __name__ == "__main__":
     from transformers import AutoTokenizer
