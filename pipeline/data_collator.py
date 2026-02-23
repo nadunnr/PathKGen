@@ -124,7 +124,7 @@ class VLMDataCollator:
                     ) for item in batch
                 ]
         
-        # Tokenize prompt_message
+        # Tokenize prompt_message with truncation strategy that preserves image markers
         tokenized = self.tokenizer(
             prompt_message,
             padding=self.padding,
@@ -132,6 +132,65 @@ class VLMDataCollator:
             max_length=self.max_length,
             return_tensors="pt"
         )
+
+        # CRITICAL: Ensure image markers are always present
+        # If truncation removed the closing marker, it will cause an error in model.forward()
+        input_ids = tokenized['input_ids']
+        
+        # Try to get image marker token IDs
+        image_start_id = self.tokenizer.convert_tokens_to_ids(IMAGE_START_TOKEN)
+        image_end_id = self.tokenizer.convert_tokens_to_ids(IMAGE_END_TOKEN)
+        
+        # Handle case where convert_tokens_to_ids returns list for unknown tokens
+        if isinstance(image_start_id, list):
+            image_start_id = image_start_id[0] if image_start_id else None
+        if isinstance(image_end_id, list):
+            image_end_id = image_end_id[0] if image_end_id else None
+        
+        # Better approach: decode and check for strings
+        for i in range(len(input_ids)):
+            seq = input_ids[i]
+            # Find actual sequence length (before padding)
+            actual_len = (seq != self.tokenizer.pad_token_id).sum().item()
+            
+            # Decode the sequence to check for markers
+            actual_tokens = seq[:actual_len]
+            
+            # Try both token ID matching and string matching
+            has_start_id = False
+            has_end_id = False
+            
+            if image_start_id is not None:
+                has_start_id = (actual_tokens == image_start_id).any().item()
+            if image_end_id is not None:
+                has_end_id = (actual_tokens == image_end_id).any().item()
+            
+            # Also check by decoding
+            decoded = self.tokenizer.decode(actual_tokens)
+            has_start_str = IMAGE_START_TOKEN in decoded
+            has_end_str = IMAGE_END_TOKEN in decoded
+            
+            has_start = has_start_id or has_start_str
+            has_end = has_end_id or has_end_str
+            
+            if not (has_start and has_end):
+                print(f"\n{'='*70}")
+                print(f"ERROR: Image markers lost in sample {i}")
+                print(f"{'='*70}")
+                print(f"Expected markers: {IMAGE_START_TOKEN}, {IMAGE_END_TOKEN}")
+                print(f"Found via token ID: start={has_start_id}, end={has_end_id}")
+                print(f"Found via string: start={has_start_str}, end={has_end_str}")
+                print(f"Token IDs: start={image_start_id}, end={image_end_id}")
+                print(f"Sequence length: {actual_len} (before padding)")
+                print(f"Max length setting: {self.max_length}")
+                print(f"Decoded text (first 300 chars):\n{decoded[:300]}")
+                print(f"{'='*70}\n")
+                
+                raise ValueError(
+                    f"Sample {i} lost image markers during tokenization. "
+                    f"This indicates max_length={self.max_length} is too small to fit the prompt. "
+                    f"Increase --max_length (try 1024 or higher) or reduce knowledge text length."
+                )
 
         # print("tokenized.keys()", tokenized.keys())
         # print("tokenized.input_ids.shape", tokenized.input_ids.shape)
