@@ -45,9 +45,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate VLM checkpoint with full metrics")
     
     # Required arguments
-    parser.add_argument("--checkpoint", type=str, required=True,
-                       help="Path to model checkpoint (.pt file)")
-    parser.add_argument("--stage", type=int, choices=[1, 2], required=True,
+    parser.add_argument("--checkpoint", type=str, required=False,
+                       help="Path to model checkpoint (.pt file)", default='/home/sandun/nadun/histo_vlm/checkpoints/stage2_wsi_bench/2026-02-23_11-47_vt128_ml768_e3_bs1/best_model.pt')
+    parser.add_argument("--stage", type=int, choices=[1, 2], required=False,
                        help="Stage 1 (projection only) or Stage 2 (projection + QLoRA)")
     
     # Data arguments

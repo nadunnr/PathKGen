@@ -56,7 +56,6 @@ python train_stage2.py \
     --eval_num_beams 4 \
     --eval_length_penalty 1.0 \
     --no_repeat_ngram_size 3 \
-    --use_entity_f1
 
 
 

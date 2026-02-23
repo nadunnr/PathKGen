@@ -264,7 +264,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_gdc", action="store_true", help="Fetch metadata from GDC API")
     args = parser.parse_args()
 
-    base_dir = "/home/nadun/wd/datasets/wsi_bench/dataset_raw"
+    base_dir = "home/sandun/nadun/data/datasets/wsi_bench/dataset_raw"
     output_dir = os.path.join(os.path.dirname(base_dir), "dataset/wsi_bench_full")
     os.makedirs(output_dir, exist_ok=True)
     

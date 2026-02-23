@@ -191,8 +191,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Preset paths (Defaults)
-    input_train_file = "/home/sandun/nadun/data/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
-    input_test_file = "/home/sandun/nadun/data/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
+    input_train_file = "/home/sandun/nadun/data/dataset/wsi_bench_full/WSI-Bench-train.json"
+    input_test_file = "/home/sandun/nadun/data/dataset/wsi_bench_full/WSI-Bench-test.json"
     
     output_dir = args.output_dir if args.output_dir else "/home/sandun/nadun/data/dataset/"
 
