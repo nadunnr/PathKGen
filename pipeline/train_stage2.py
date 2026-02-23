@@ -20,19 +20,20 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from transformers import AutoTokenizer
 
 # Local imports
-from model import VisionLanguageModel
+from model import VisionLanguageModel, compute_rdrop_loss
 from dataset import WSI_Report_Dataset
 from data_collator import VLMDataCollator
 from config import (GENERATION_PROMPT, TRAINING_PROMPT_TEMPLATE,
-                    DEFAULT_LLM_PATH, DEFAULT_SLIDECHAT_CHECKPOINT,
+                    DEFAULT_LLM_PATH, DEFAULT_SLIDECHAT_CHECKPOINT, 
                     DEFAULT_DATA_JSON, DEFAULT_STAGE2_OUTPUT,
                     DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS,
                     DEFAULT_MAX_LENGTH, DEFAULT_MAX_NEW_TOKENS,
                     extract_report_from_labels)
+from metrics import compute_bleu_penalty
 
 
 def parse_args():
@@ -83,13 +84,20 @@ def parse_args():
                        help="Learning rate for projection layer")
     parser.add_argument("--weight_decay", type=float, default=0.01,
                        help="Weight decay")
+    parser.add_argument("--use_bleu_penalty", action="store_true",
+                       help="Enable BLEU-based penalty loss during training")
+    parser.add_argument("--bleu_penalty_weight", type=float, default=2,
+                       help="Weight for BLEU penalty loss (total_loss = ce_loss + bleu_penalty_weight * bleu_penalty)")
+    parser.add_argument("--bleu_metric", type=str, default="bleu2",
+                       choices=["bleu1", "bleu2", "bleu3", "bleu4"],
+                       help="Which BLEU metric to use for penalty")
     parser.add_argument("--max_length", type=int, default=DEFAULT_MAX_LENGTH,
                        help="Maximum sequence length")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=16,
                        help="Gradient accumulation steps (effective batch = batch_size * accum_steps)")
     parser.add_argument("--gradient_checkpointing", action="store_true",
                        help="Enable gradient checkpointing to save memory")
-    parser.add_argument("--num_workers", type=int, default=4,
+    parser.add_argument("--num_workers", type=int, default=8,
                        help="DataLoader workers")
     
     # Knowledge guidance arguments
@@ -131,6 +139,25 @@ def parse_args():
     parser.add_argument("--log_every", type=int, default=10,
                        help="Log every N steps")
     
+    # NLU Score Improvement Arguments
+    parser.add_argument("--label_smoothing", type=float, default=0.0,
+                       help="Label smoothing factor (0.0 = no smoothing, 0.1 = recommended)")
+    parser.add_argument("--use_rdrop", action="store_true",
+                       help="Enable R-Drop consistency regularization (improves generalization)")
+    parser.add_argument("--rdrop_alpha", type=float, default=0.5,
+                       help="Weight for R-Drop KL divergence term")
+    parser.add_argument("--warmup_ratio", type=float, default=0.0,
+                       help="Ratio of total steps for linear warmup (e.g., 0.1 = 10%% warmup)")
+    parser.add_argument("--warmup_steps", type=int, default=0,
+                       help="Number of warmup steps (overrides warmup_ratio if > 0)")
+    
+    # Generation improvements for evaluation
+    parser.add_argument("--eval_num_beams", type=int, default=1,
+                       help="Number of beams for beam search during evaluation (1 = greedy)")
+    parser.add_argument("--eval_length_penalty", type=float, default=1.0,
+                       help="Length penalty for beam search (>1 favors longer, <1 favors shorter)")
+    parser.add_argument("--no_repeat_ngram_size", type=int, default=3,
+                       help="Size of n-grams that cannot repeat during generation")   
     return parser.parse_args()
 
 
@@ -144,11 +171,130 @@ def set_seed(seed: int):
     np.random.seed(seed)
 
 
-def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device):
+def compute_bleu_penalty_loss(
+    model, 
+    visual_features, 
+    labels, 
+    tokenizer, 
+    input_ids,
+    attention_mask,
+    bleu_metric='bleu4',
+    max_gen_tokens=128,
+    baseline_bleu=None,  # Now dynamic
+    num_samples=1  # For minimum risk training
+):
+    """
+    Compute BLEU-aware loss using Minimum Risk Training (MRT) style objective.
+    
+    This is more stable than REINFORCE because:
+    1. Uses greedy decoding (matches evaluation)
+    2. Dynamic baseline (running average)
+    3. Direct reward weighting instead of policy gradients
+    
+    The loss encourages the model to assign higher probability to 
+    sequences that achieve higher BLEU scores.
+    
+    Args:
+        model: The VLM model
+        visual_features: Visual features tensor [batch_size, num_tokens, visual_dim]
+        labels: Ground truth label ids [batch_size, seq_len]
+        tokenizer: Tokenizer for decoding
+        input_ids: Input token ids for the prompt
+        attention_mask: Attention mask for the prompt
+        bleu_metric: Which BLEU metric to use
+        max_gen_tokens: Maximum tokens to generate
+        baseline_bleu: Dynamic baseline (pass running average, or None for first call)
+        num_samples: Number of samples for MRT (1 = simpler reward-weighted MLE)
+        
+    Returns:
+        bleu_loss: Differentiable loss term
+        avg_bleu: Average BLEU score for this batch (for logging and baseline update)
+    """
+    batch_size = visual_features.shape[0]
+    bleu_scores = []
+    weighted_losses = []
+    
+    # Process each sample in the batch
+    for i in range(batch_size):
+        single_visual = visual_features[i:i+1]
+        single_labels = labels[i]
+        single_input_ids = input_ids[i:i+1]
+        single_attention_mask = attention_mask[i:i+1]
+        
+        # Extract ground truth reference text from labels
+        label_ids = single_labels[single_labels != -100]
+        reference_text = tokenizer.decode(label_ids, skip_special_tokens=True)
+        
+        # Skip if reference is too short
+        if len(reference_text.split()) < 3:
+            continue
+        
+        # Generate with GREEDY decoding (matches evaluation!)
+        with torch.no_grad():
+            model.eval()
+            generated_text = model.generate(
+                visual_features=single_visual,
+                prompt=None,
+                max_new_tokens=max_gen_tokens,
+                temperature=0.0,  # Greedy - matches evaluation
+                num_beams=1
+            )
+            model.train()
+        
+        # Compute BLEU score (reward)
+        bleu_score = compute_bleu_penalty(generated_text, reference_text, metric=bleu_metric)
+        bleu_scores.append(bleu_score)
+        
+        # Compute reward relative to baseline
+        current_baseline = baseline_bleu if baseline_bleu is not None else 0.2
+        reward = bleu_score - current_baseline
+        
+        # Compute reward weight (exponential scaling for stability)
+        # Higher BLEU → lower weight on CE loss (model is doing well)
+        # Lower BLEU → higher weight on CE loss (model needs more training on this sample)
+        # This is like "hard example mining" weighted by BLEU
+        import math
+        # Sigmoid scaling: maps reward to [0.5, 2.0] weight range
+        # reward < 0 → weight > 1 (focus more on this sample)
+        # reward > 0 → weight < 1 (sample is already good)
+        weight = 1.0 / (1.0 + math.exp(5.0 * reward))  # Inverse sigmoid
+        weight = 0.5 + weight  # Map to [0.5, 1.5] range
+        
+        # Forward pass to get CE loss on ground truth
+        outputs = model(
+            visual_features=single_visual,
+            input_ids=single_input_ids,
+            attention_mask=single_attention_mask,
+            labels=single_labels.unsqueeze(0)
+        )
+        
+        # Weight the CE loss by inverse reward (focus on hard examples)
+        weighted_loss = weight * outputs['loss']
+        weighted_losses.append(weighted_loss)
+        
+        del outputs
+    
+    if len(weighted_losses) == 0:
+        return torch.tensor(0.0, device=visual_features.device, requires_grad=True), 0.0
+    
+    # Average the weighted losses
+    bleu_loss = torch.stack(weighted_losses).mean()
+    avg_bleu = sum(bleu_scores) / len(bleu_scores) if bleu_scores else 0.0
+    
+    return bleu_loss, avg_bleu
+
+
+def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device, tokenizer=None, running_bleu_baseline=None):
     """Train for one epoch."""
     model.train()
     total_loss = 0
+    total_bleu_penalty = 0.0
+    bleu_scores_epoch = []
     optimizer.zero_grad()
+    
+    # Dynamic baseline for BLEU penalty (exponential moving average)
+    if running_bleu_baseline is None:
+        running_bleu_baseline = 0.2  # Initial estimate
     
     pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{args.epochs} [Train]")
     
@@ -166,24 +312,94 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device):
             knowledge_input_ids = knowledge_input_ids.to(device)
             knowledge_attention_mask = knowledge_attention_mask.to(device)
         
-        # Forward pass
-        outputs = model(
-            visual_features=visual_features,
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            labels=labels,
-            knowledge_input_ids=knowledge_input_ids,
-            knowledge_attention_mask=knowledge_attention_mask
-        )
+        # Forward pass (with optional R-Drop consistency regularization)
+        if args.use_rdrop:
+            # R-Drop: Pass input through model twice with different dropout masks
+            outputs1 = model(
+                visual_features=visual_features,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=None,  # Don't compute loss in model (we compute R-Drop loss)
+                knowledge_input_ids=knowledge_input_ids,
+                knowledge_attention_mask=knowledge_attention_mask
+            )
+            outputs2 = model(
+                visual_features=visual_features,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=None,
+                knowledge_input_ids=knowledge_input_ids,
+                knowledge_attention_mask=knowledge_attention_mask
+            )
+            
+            # Compute R-Drop loss (CE + KL divergence)
+            # Shift logits and labels for causal LM
+            shift_logits1 = outputs1['logits'][..., :-1, :].contiguous()
+            shift_logits2 = outputs2['logits'][..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            
+            ce_loss = compute_rdrop_loss(
+                shift_logits1, shift_logits2, shift_labels,
+                ignore_index=-100,
+                alpha=args.rdrop_alpha
+            )
+            
+            del outputs1, outputs2
+        else:
+            # Standard forward pass
+            outputs = model(
+                visual_features=visual_features,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=labels,
+                knowledge_input_ids=knowledge_input_ids,
+                knowledge_attention_mask=knowledge_attention_mask
+            )
+            ce_loss = outputs['loss']
+            del outputs
         
-        loss = outputs['loss']
+        # Compute BLEU penalty if enabled (now with hard example mining)
+        bleu_penalty = torch.tensor(0.0, device=device, requires_grad=False)
+        if args.use_bleu_penalty and tokenizer is not None:
+            # Compute BLEU penalty every gradient accumulation cycle to save compute
+            if (step + 1) % args.gradient_accumulation_steps == 0 or step == 0:
+                bleu_penalty, avg_bleu = compute_bleu_penalty_loss(
+                    model=model,
+                    visual_features=visual_features,
+                    labels=labels,
+                    tokenizer=tokenizer,
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    bleu_metric=args.bleu_metric,
+                    max_gen_tokens=128,
+                    baseline_bleu=running_bleu_baseline  # Dynamic baseline!
+                )
+                bleu_scores_epoch.append(avg_bleu)
+                
+                # Update running baseline (EMA with alpha=0.1)
+                running_bleu_baseline = 0.9 * running_bleu_baseline + 0.1 * avg_bleu
+                
+                # Handle both differentiable and non-differentiable tensors
+                if bleu_penalty.requires_grad:
+                    total_bleu_penalty += bleu_penalty.detach().item()
+                else:
+                    total_bleu_penalty += bleu_penalty.item()
+                # Log BLEU computation
+                tqdm.write(f"  [Step {step}] BLEU: {avg_bleu:.4f}, baseline: {running_bleu_baseline:.4f}")
+        
+        # Combine losses: 
+        # - Without BLEU penalty: just CE loss
+        # - With BLEU penalty: use the weighted CE loss from BLEU function (replaces normal CE)
+        if args.use_bleu_penalty and bleu_penalty.requires_grad:
+            loss = bleu_penalty  # This is already the weighted CE loss
+        else:
+            loss = ce_loss
         
         # Scale loss for gradient accumulation
         loss = loss / args.gradient_accumulation_steps
         loss.backward()
         
-        # Free memory from forward pass immediately
-        del outputs
+        # Free memory from forward pass immediately (already cleaned up above)
         
         # Optimizer step
         if (step + 1) % args.gradient_accumulation_steps == 0:
@@ -198,13 +414,23 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device):
         
         # Update progress bar
         if step % args.log_every == 0:
-            pbar.set_postfix({
+            postfix = {
                 'loss': f'{loss.item() * args.gradient_accumulation_steps:.4f}',
                 'lr': f'{scheduler.get_last_lr()[0]:.2e}'
-            })
+            }
+            if args.use_bleu_penalty and len(bleu_scores_epoch) > 0:
+                postfix['bleu'] = f'{bleu_scores_epoch[-1]:.3f}'
+            pbar.set_postfix(postfix)
     
     avg_loss = total_loss / len(dataloader)
-    return avg_loss
+    
+    # Log BLEU penalty info if enabled
+    if args.use_bleu_penalty and len(bleu_scores_epoch) > 0:
+        avg_bleu = sum(bleu_scores_epoch) / len(bleu_scores_epoch)
+        avg_bleu_penalty = total_bleu_penalty / len(bleu_scores_epoch)
+        return avg_loss, {'avg_bleu': avg_bleu, 'avg_bleu_penalty': avg_bleu_penalty, 'running_baseline': running_bleu_baseline}
+    
+    return avg_loss, {'running_baseline': running_bleu_baseline if args.use_bleu_penalty else None}
 
 
 @torch.no_grad()
@@ -276,13 +502,17 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
                 if 'knowledge_texts' in batch and args.use_knowledge_guidance:
                     knowledge_text = batch['knowledge_texts'][i]
                 
+                # Use beam search if configured for better NLU metrics
                 pred_text = model.generate(
                     visual_features=single_visual,
                     prompt=None,  # Let model auto-select based on knowledge_text
                     knowledge_text=knowledge_text,
                     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
-                    temperature=0.0,  # Greedy decoding for evaluation (SOTA standard)
-                    top_p=1.0         # No nucleus sampling for deterministic output
+                    temperature=0.0,  # Greedy/beam search for evaluation
+                    top_p=1.0,
+                    num_beams=getattr(args, 'eval_num_beams', 1),
+                    length_penalty=getattr(args, 'eval_length_penalty', 1.0),
+                    no_repeat_ngram_size=getattr(args, 'no_repeat_ngram_size', 3)
                 )
                 all_predictions.append(pred_text)
                 
@@ -550,6 +780,7 @@ def main():
         use_qlora=True,    # Stage 2: Use QLoRA
         freeze_llm=False,  # Stage 2: Train LLM with LoRA
         gradient_checkpointing=args.gradient_checkpointing,
+        label_smoothing=args.label_smoothing,
         device=device
     )
     
@@ -593,9 +824,34 @@ def main():
         n_params = sum(p.numel() for p in group['params'])
         print(f"  {group['name']}: {n_params:,} params, lr={group['lr']:.2e}")
     
-    # Learning rate scheduler
+    # Learning rate scheduler with optional warmup
     num_training_steps = len(train_loader) * args.epochs // args.gradient_accumulation_steps
-    scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps, eta_min=1e-7)
+    
+    # Compute warmup steps
+    if args.warmup_steps > 0:
+        num_warmup_steps = args.warmup_steps
+    elif args.warmup_ratio > 0:
+        num_warmup_steps = int(num_training_steps * args.warmup_ratio)
+    else:
+        num_warmup_steps = 0
+    
+    if num_warmup_steps > 0:
+        # Warmup + Cosine decay scheduler
+        def lr_lambda(current_step):
+            if current_step < num_warmup_steps:
+                # Linear warmup
+                return float(current_step) / float(max(1, num_warmup_steps))
+            # Cosine decay after warmup
+            progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+            import math
+            return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+        
+        scheduler = LambdaLR(optimizer, lr_lambda)
+        print(f"Using warmup + cosine decay scheduler: {num_warmup_steps} warmup steps out of {num_training_steps} total")
+    else:
+        # Standard cosine annealing without warmup
+        scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps, eta_min=1e-7)
+        print(f"Using cosine annealing scheduler: {num_training_steps} total steps")
     
     # Resume from checkpoint if specified
     start_epoch = 0
@@ -639,10 +895,27 @@ def main():
     # Track last completed epoch (initialize to start_epoch - 1 in case no epochs run)
     epoch = start_epoch - 1 if start_epoch > 0 else 0
     
+    # Running BLEU baseline for dynamic hard example mining
+    running_bleu_baseline = None
+    
     for epoch in range(start_epoch, args.epochs):
         # Train
-        train_loss = train_epoch(model, train_loader, optimizer, scheduler, epoch, args, device)
+        train_loss, train_bleu_info = train_epoch(
+            model, train_loader, optimizer, scheduler, epoch, args, device, 
+            tokenizer=tokenizer if args.use_bleu_penalty else None,
+            running_bleu_baseline=running_bleu_baseline
+        )
         history['train_loss'].append(train_loss)
+        
+        # Update running baseline for next epoch
+        if train_bleu_info and 'running_baseline' in train_bleu_info:
+            running_bleu_baseline = train_bleu_info['running_baseline']
+        
+        # Store BLEU penalty info if available
+        if train_bleu_info:
+            if 'train_bleu' not in history:
+                history['train_bleu'] = []
+            history['train_bleu'].append(train_bleu_info.get('avg_bleu', 0.0))
         
         # Aggressive memory cleanup between training and validation
         torch.cuda.empty_cache()
@@ -665,6 +938,9 @@ def main():
         # Print epoch summary
         print(f"\nEpoch {epoch+1}/{args.epochs}:")
         print(f"  Train Loss: {train_loss:.4f}")
+        if train_bleu_info:
+            print(f"  Train BLEU ({args.bleu_metric}): {train_bleu_info.get('avg_bleu', 0):.3f}  "
+                  f"BLEU Penalty: {train_bleu_info.get('avg_bleu_penalty', 0):.3f}")
         print(f"  Val Loss: {val_loss:.4f}")
         if val_metrics:
             print(f"  BLEU-1: {val_metrics.get('bleu1', 0):.2f}  "
