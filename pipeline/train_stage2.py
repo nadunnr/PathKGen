@@ -230,6 +230,7 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
     num_samples = 0
     all_predictions = []
     all_references = []
+    all_ids = []
     
     pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]")
     
@@ -299,11 +300,15 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
                     top_p=1.0         # No nucleus sampling for deterministic output
                 )
                 all_predictions.append(pred_text)
-                
+
                 # Extract ground truth report from labels
                 label_ids = labels[i][labels[i] != -100]
                 ref_text = extract_report_from_labels(tokenizer, label_ids)
                 all_references.append(ref_text)
+
+                # Collect sample ID (tcga_id)
+                sample_id = batch['ids'][i] if 'ids' in batch else str(len(all_ids))
+                all_ids.append(sample_id)
                 
                 # Re-enable gradient checkpointing if needed
                 if hasattr(model.llm, 'gradient_checkpointing_enable') and args.gradient_checkpointing:
@@ -326,19 +331,22 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
         from metrics import compute_metrics as calc_metrics
         metrics = calc_metrics(all_predictions, all_references)
 
-        # Save predictions vs references for inspection
+        # Save model.generate() outputs as formatted JSON for easy comparison
+        import json
         results_dir = args.output_results_dir
         os.makedirs(results_dir, exist_ok=True)
-        results_path = os.path.join(results_dir, f'stage2_val_epoch{epoch+1}.jsonl')
+        results_path = os.path.join(results_dir, f'stage2_val_epoch{epoch+1}.json')
+        records = [
+            {
+                'tcga_id':    tcga_id,
+                'prediction': pred,
+                'reference':  ref,
+            }
+            for tcga_id, pred, ref in zip(all_ids, all_predictions, all_references)
+        ]
         with open(results_path, 'w') as f:
-            for i, (pred, ref) in enumerate(zip(all_predictions, all_references)):
-                import json
-                f.write(json.dumps({
-                    'idx': i,
-                    'prediction': pred,
-                    'reference': ref
-                }) + '\n')
-        print(f"  [Results] Saved {len(all_predictions)} prediction/reference pairs → {results_path}")
+            json.dump(records, f, indent=4)
+        print(f"  [Results] Saved {len(records)} entries → {results_path}")
 
     return avg_loss, metrics
 
@@ -464,7 +472,11 @@ def main():
     exp_name = f"{timestamp}_vt{args.num_visual_tokens}_ml{args.max_length}_e{args.epochs}_bs{args.batch_size}"
     exp_dir = os.path.join(args.output_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
-    
+
+    # Mirror experiment name in results dir so each run gets its own folder
+    args.output_results_dir = os.path.join(args.output_results_dir, exp_name)
+    os.makedirs(args.output_results_dir, exist_ok=True)
+
     print(f"\n{'='*60}")
     print(f"Experiment directory: {exp_dir}")
     print(f"{'='*60}")
