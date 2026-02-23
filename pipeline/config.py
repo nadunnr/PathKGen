@@ -200,7 +200,7 @@ DEFAULT_MAX_KNOWLEDGE_TOKENS = 64
 # ============================================================================
 
 # Default paths (can be overridden by command-line arguments)
-DEFAULT_LLM_PATH = "/home/sandun/nadun/histo_vlm/checkpoints/Qwen2.5-7B-Instruct"
+DEFAULT_LLM_PATH = "prithivMLmods/Qwen-UMLS-7B-Instruct"
 DEFAULT_SLIDECHAT_CHECKPOINT = "/home/sandun/nadun/vlm_histo_old/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt"
 DEFAULT_DATA_JSON = "/home/sandun/nadun/data/dataset/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
 DEFAULT_STAGE1_OUTPUT = "/home/sandun/nadun/histo_vlm/checkpoints/stage1"
