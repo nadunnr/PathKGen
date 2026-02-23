@@ -76,6 +76,13 @@ def parse_args():
                        help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=0.01,
                        help="Weight decay")
+    parser.add_argument("--use_bleu_penalty", action="store_true",
+                       help="Enable BLEU-based penalty loss during training")
+    parser.add_argument("--bleu_penalty_weight", type=float, default=0.1,
+                       help="Weight for BLEU penalty loss (total_loss = ce_loss + bleu_penalty_weight * bleu_penalty)")
+    parser.add_argument("--bleu_metric", type=str, default="bleu4",
+                       choices=["bleu1", "bleu2", "bleu3", "bleu4"],
+                       help="Which BLEU metric to use for penalty")
     parser.add_argument("--warmup_ratio", type=float, default=0.1,
                        help="Warmup ratio for scheduler")
     parser.add_argument("--gradient_checkpointing", action="store_true",

@@ -15,7 +15,7 @@ WSI_BENCH_TEST="/home/sandun/nadun/data/dataset/wsi_bench_Report_with_features/w
 KNOWLEDGE_TRAIN_JSON="/home/sandun/nadun/data/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
 KNOWLEDGE_TEST_JSON="/home/sandun/nadun/data/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
 
-OUTPUT_DIR="/home/sandun/nadun/vlm_histo/checkpoints/stage1_wsi_bench_knowledge"
+OUTPUT_DIR="/home/sandun/nadun/vlm_histo/checkpoints/stage1_wsi_bench"
 
 python train_stage1.py \
     --train_json "$WSI_BENCH_TRAIN" \
@@ -30,6 +30,7 @@ python train_stage1.py \
     --weight_decay 0.01 \
     --feature_key tokens \
     --gradient_checkpointing \
+    --max_length 1024 \
     --val_batch_size 1 \
     --output_dir "$OUTPUT_DIR" \
 
