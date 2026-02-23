@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from typing import Optional, Dict, Tuple
@@ -8,6 +9,145 @@ import warnings
 from config import (DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS, 
                     DEFAULT_LLM_HIDDEN_DIM, DEFAULT_LLM_PATH, 
                     DEFAULT_SLIDECHAT_CHECKPOINT, IMAGE_START_TOKEN, IMAGE_END_TOKEN)
+
+
+def label_smoothing_loss(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    smoothing: float = 0.1,
+    ignore_index: int = -100
+) -> torch.Tensor:
+    """
+    Compute cross-entropy loss with label smoothing.
+    
+    Label smoothing prevents the model from becoming overconfident by
+    distributing some probability mass to non-target classes.
+    
+    Args:
+        logits: [batch, seq_len, vocab_size] model outputs
+        labels: [batch, seq_len] target token ids
+        smoothing: Label smoothing factor (0.0 = no smoothing)
+        ignore_index: Index to ignore in loss computation
+        
+    Returns:
+        Scalar loss tensor
+    """
+    if smoothing <= 0.0:
+        # No smoothing - use standard cross entropy
+        return F.cross_entropy(
+            logits.view(-1, logits.size(-1)),
+            labels.view(-1),
+            ignore_index=ignore_index
+        )
+    
+    vocab_size = logits.size(-1)
+    
+    # Flatten logits and labels
+    logits_flat = logits.view(-1, vocab_size)  # [batch*seq, vocab]
+    labels_flat = labels.view(-1)  # [batch*seq]
+    
+    # Create mask for valid positions (not ignore_index)
+    valid_mask = labels_flat != ignore_index
+    
+    if valid_mask.sum() == 0:
+        return torch.tensor(0.0, device=logits.device, requires_grad=True)
+    
+    # Filter to valid positions only
+    valid_logits = logits_flat[valid_mask]  # [valid, vocab]
+    valid_labels = labels_flat[valid_mask]  # [valid]
+    
+    # Log softmax for numerical stability
+    log_probs = F.log_softmax(valid_logits, dim=-1)  # [valid, vocab]
+    
+    # One-hot encode labels with smoothing
+    # Confidence on true label: 1 - smoothing
+    # Distributed to other labels: smoothing / (vocab_size - 1)
+    n_valid = valid_labels.size(0)
+    
+    # Create smoothed target distribution
+    smooth_target = torch.full_like(log_probs, smoothing / (vocab_size - 1))
+    smooth_target.scatter_(1, valid_labels.unsqueeze(1), 1.0 - smoothing)
+    
+    # KL divergence loss (equivalent to cross-entropy with soft targets)
+    loss = -torch.sum(smooth_target * log_probs) / n_valid
+    
+    return loss
+
+
+def compute_rdrop_loss(
+    logits1: torch.Tensor,
+    logits2: torch.Tensor,
+    labels: torch.Tensor,
+    ignore_index: int = -100,
+    alpha: float = 1.0
+) -> torch.Tensor:
+    """
+    Compute R-Drop consistency regularization loss.
+    
+    R-Drop passes the same input through the model twice (with dropout)
+    and penalizes the KL divergence between output distributions.
+    This improves generalization and robustness.
+    
+    Reference: "R-Drop: Regularized Dropout for Neural Networks" (Wu et al., 2021)
+    
+    Args:
+        logits1: First forward pass logits [batch, seq, vocab]
+        logits2: Second forward pass logits [batch, seq, vocab]
+        labels: Target labels [batch, seq] (used to mask positions)
+        ignore_index: Index to ignore in loss
+        alpha: Weight for KL divergence term
+        
+    Returns:
+        R-Drop loss = CE_loss + alpha * KL_divergence
+    """
+    # Compute CE loss for both passes
+    ce_loss1 = F.cross_entropy(
+        logits1.view(-1, logits1.size(-1)),
+        labels.view(-1),
+        ignore_index=ignore_index
+    )
+    ce_loss2 = F.cross_entropy(
+        logits2.view(-1, logits2.size(-1)),
+        labels.view(-1),
+        ignore_index=ignore_index
+    )
+    ce_loss = (ce_loss1 + ce_loss2) / 2
+    
+    # Create mask for valid positions
+    valid_mask = labels != ignore_index
+    
+    if valid_mask.sum() == 0:
+        return ce_loss
+    
+    # Compute KL divergence between the two distributions
+    # KL(P||Q) + KL(Q||P) / 2 for symmetry
+    p = F.softmax(logits1, dim=-1)
+    q = F.softmax(logits2, dim=-1)
+    
+    # Log softmax for numerical stability
+    log_p = F.log_softmax(logits1, dim=-1)
+    log_q = F.log_softmax(logits2, dim=-1)
+    
+    # Symmetric KL divergence (only on valid positions)
+    # Flatten to [batch*seq, vocab]
+    p_flat = p.view(-1, p.size(-1))
+    q_flat = q.view(-1, q.size(-1))
+    log_p_flat = log_p.view(-1, log_p.size(-1))
+    log_q_flat = log_q.view(-1, log_q.size(-1))
+    valid_mask_flat = valid_mask.view(-1)
+    
+    # Filter valid positions
+    p_valid = p_flat[valid_mask_flat]
+    q_valid = q_flat[valid_mask_flat]
+    log_p_valid = log_p_flat[valid_mask_flat]
+    log_q_valid = log_q_flat[valid_mask_flat]
+    
+    # KL(P||Q) = sum(P * (log P - log Q))
+    kl_pq = torch.sum(p_valid * (log_p_valid - log_q_valid), dim=-1).mean()
+    kl_qp = torch.sum(q_valid * (log_q_valid - log_p_valid), dim=-1).mean()
+    kl_loss = (kl_pq + kl_qp) / 2
+    
+    return ce_loss + alpha * kl_loss
 
 
 class ProjectionLayer(nn.Module):
@@ -80,6 +220,7 @@ class VisionLanguageModel(nn.Module):
         use_qlora: bool = False,
         freeze_llm: bool = True,
         gradient_checkpointing: bool = False,
+        label_smoothing: float = 0.0,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
         super().__init__()
@@ -87,8 +228,9 @@ class VisionLanguageModel(nn.Module):
         self.device = device
         self.use_qlora = use_qlora
         self.freeze_llm = freeze_llm
+        self.label_smoothing = label_smoothing
         
-        # 1. Initialize tokenizer
+        # 1. Initialize tokenizer (use same path as LLM for consistency)
         print(f"Loading tokenizer from {llm_path}")
         self.tokenizer = AutoTokenizer.from_pretrained(llm_path, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
@@ -330,6 +472,24 @@ class VisionLanguageModel(nn.Module):
         marker_end_positions = (sample_input_ids == self.image_end_token_id).nonzero(as_tuple=True)[0]
         
         if len(marker_start_positions) == 0 or len(marker_end_positions) == 0:
+            # Detailed debugging info
+            import numpy as np
+            print(f"\n{'='*60}")
+            print("ERROR: Image markers not found in input_ids")
+            print(f"{'='*60}")
+            print(f"Expected start token ID: {self.image_start_token_id}")
+            print(f"Expected end token ID: {self.image_end_token_id}")
+            print(f"Start marker found: {len(marker_start_positions) > 0}")
+            print(f"End marker found: {len(marker_end_positions) > 0}")
+            print(f"Unique token IDs in sequence: {torch.unique(sample_input_ids).tolist()}")
+            print(f"Sequence length: {len(sample_input_ids)}")
+            print(f"First 20 tokens: {sample_input_ids[:20].tolist()}")
+            print(f"Last 20 tokens: {sample_input_ids[-20:].tolist()}")
+            print(f"\nPossible causes:")
+            print(f"1. Sequence was truncated and lost the </image_end> marker")
+            print(f"2. Tokenizer was not initialized with image marker special tokens")
+            print(f"3. Knowledge text is too long, pushing markers beyond max_length")
+            print(f"{'='*60}\n")
             raise ValueError("Image markers <image_start> and <image_end> not found in input_ids")
         
         visual_start_idx = marker_start_positions[0].item()
@@ -373,15 +533,37 @@ class VisionLanguageModel(nn.Module):
             combined_labels = None
         
         # 8. Forward through LLM
-        outputs = self.llm(
-            inputs_embeds=combined_embeds,
-            attention_mask=combined_attention_mask,
-            labels=combined_labels,
-            return_dict=True
-        )
+        # If using label smoothing, don't pass labels to LLM (compute custom loss)
+        if self.label_smoothing > 0 and combined_labels is not None:
+            outputs = self.llm(
+                inputs_embeds=combined_embeds,
+                attention_mask=combined_attention_mask,
+                labels=None,  # Don't compute loss in LLM
+                return_dict=True
+            )
+            
+            # Compute label smoothing loss manually
+            # Shift logits and labels for causal LM (predict next token)
+            shift_logits = outputs.logits[..., :-1, :].contiguous()
+            shift_labels = combined_labels[..., 1:].contiguous()
+            
+            loss = label_smoothing_loss(
+                shift_logits,
+                shift_labels,
+                smoothing=self.label_smoothing,
+                ignore_index=-100
+            )
+        else:
+            outputs = self.llm(
+                inputs_embeds=combined_embeds,
+                attention_mask=combined_attention_mask,
+                labels=combined_labels,
+                return_dict=True
+            )
+            loss = outputs.loss
         
         return {
-            "loss": outputs.loss,
+            "loss": loss,
             "logits": outputs.logits
         }
     
@@ -394,19 +576,34 @@ class VisionLanguageModel(nn.Module):
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.9,
-        repetition_penalty: float = 1.2
+        repetition_penalty: float = 1.2,
+        num_beams: int = 1,
+        length_penalty: float = 1.0,
+        no_repeat_ngram_size: int = 3,
+        early_stopping: bool = True,
+        diversity_penalty: float = 0.0,
+        num_beam_groups: int = 1
     ) -> str:
         """
         Generate report for a single WSI slide with image marker tokens.
         
+        Supports both sampling and beam search with various enhancements for
+        improved NLU metrics.
+        
         Args:
-            visual_features: [1, 768] or [768] slide embedding
+            visual_features: [1, num_tokens, 768] or [num_tokens, 768] slide embedding
             prompt: Text prompt (if None, uses default from config)
             knowledge_text: Optional knowledge context
             max_new_tokens: Maximum tokens to generate
-            temperature: Sampling temperature
-            top_p: Nucleus sampling parameter
+            temperature: Sampling temperature (ignored if num_beams > 1)
+            top_p: Nucleus sampling parameter (ignored if num_beams > 1)
             repetition_penalty: Penalty for repetition
+            num_beams: Number of beams for beam search (1 = greedy/sampling)
+            length_penalty: Exponential penalty for length (>1 = longer, <1 = shorter)
+            no_repeat_ngram_size: Size of n-grams that cannot repeat
+            early_stopping: Whether to stop when all beams finish
+            diversity_penalty: Penalty for diverse beam search (requires num_beam_groups > 1)
+            num_beam_groups: Number of beam groups for diverse decoding
             
         Returns:
             Generated report text
@@ -416,7 +613,7 @@ class VisionLanguageModel(nn.Module):
         self.eval()
         
         # Ensure batch dimension
-        if visual_features.dim() == 1:
+        if visual_features.dim() == 2:
             visual_features = visual_features.unsqueeze(0)
         
         # Select appropriate prompt if not provided
@@ -455,17 +652,41 @@ class VisionLanguageModel(nn.Module):
             # Fallback: prepend visual tokens if no markers found
             combined_embeds = torch.cat([visual_tokens, prompt_embeds], dim=1)
         
+        # Build generation config based on parameters
+        gen_kwargs = {
+            'inputs_embeds': combined_embeds,
+            'max_new_tokens': max_new_tokens,
+            'repetition_penalty': repetition_penalty,
+            'eos_token_id': self.tokenizer.eos_token_id,
+            'pad_token_id': self.tokenizer.pad_token_id,
+            'no_repeat_ngram_size': no_repeat_ngram_size,
+        }
+        
+        if num_beams > 1:
+            # Beam search mode - better for NLU metrics
+            gen_kwargs.update({
+                'do_sample': False,
+                'num_beams': num_beams,
+                'length_penalty': length_penalty,
+                'early_stopping': early_stopping,
+            })
+            
+            # Diverse beam search if requested
+            if diversity_penalty > 0 and num_beam_groups > 1:
+                gen_kwargs.update({
+                    'num_beam_groups': num_beam_groups,
+                    'diversity_penalty': diversity_penalty,
+                })
+        else:
+            # Sampling mode
+            gen_kwargs.update({
+                'do_sample': temperature > 0,
+                'temperature': temperature if temperature > 0 else 1.0,
+                'top_p': top_p,
+            })
+        
         # Generate
-        outputs = self.llm.generate(
-            inputs_embeds=combined_embeds,
-            max_new_tokens=max_new_tokens,
-            do_sample=temperature > 0,
-            temperature=temperature,
-            top_p=top_p,
-            repetition_penalty=repetition_penalty,
-            eos_token_id=self.tokenizer.eos_token_id,
-            pad_token_id=self.tokenizer.pad_token_id
-        )
+        outputs = self.llm.generate(**gen_kwargs)
         
         # Decode (skip special tokens)
         generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
