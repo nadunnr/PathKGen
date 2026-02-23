@@ -1,5 +1,4 @@
 import os
-import csv
 import numpy as np
 import h5py
 import torch
@@ -10,12 +9,14 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import Counter
+from head import ConceptHead
+from dataset import ConceptDatasetwithSite
+from utils import load_labels, save_vocabs, save_distribution
 
 # Set-up
-LABEL_CSV = "/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_extracted_train.csv"
-EMBEDDING_DIR = "/home/nadun/wd/datasets/wsi_bench/slide_features/train"
-os.makedirs("without_tgc", exist_ok=True)
-OUTPUT_PREFIX = "without_tgc/without_tgc_variant_classifier"
+LABEL_JSON = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
+os.makedirs("output", exist_ok=True)
+OUTPUT_PREFIX = "output/classifier"
 
 # Hyper-parameters
 BATCH_SIZE = 128
@@ -23,110 +24,28 @@ EPOCHS = 20
 LR = 3e-4
 VAL_SPLIT = 0.2
 RANDOM_SEED = 42
+SITE_EMB_DIM=16
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
-# Dataset
-class WSIDataset(Dataset):
-    def __init__(self, ids, labels, label_to_idx):
-        self.ids = ids
-        self.labels = labels
-        self.label_to_idx = label_to_idx
-
-    def __len__(self):
-        return len(self.ids)
-
-    def __getitem__(self, idx):
-        tcga_id = self.ids[idx]
-        emb_path = os.path.join(EMBEDDING_DIR, f"{tcga_id}.h5")
-        
-        with h5py.File(emb_path, 'r') as f:
-            embedding = f['features'][:]
-            embedding = (embedding - embedding.mean()) / (embedding.std() + 1e-6) # normalize
-
-
-        label = self.label_to_idx[self.labels[idx]]
-        return torch.tensor(embedding, dtype=torch.float32), label
-
-# Model
-class LinearClassifier(nn.Module):
-    def __init__(self, input_dim, num_classes):
-        super().__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(256, num_classes)
-        )
-
-
-    def forward(self, x):
-        return self.fc(x)
-
-
-# Load labels
-def load_labels(csv_path):
-    ids, labels = [], []
-
-    with open(csv_path, "r") as f:
-        reader = csv.DictReader(f)
-        label_name = reader.fieldnames[1]  # histology / grade / site
-
-        for row in reader:
-            ids.append(row["tcga_id"])
-            labels.append(row[label_name])
-
-    return ids, labels
 
 # Training 
 def train():
     torch.manual_seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
 
-    ids, labels = load_labels(LABEL_CSV)
+    ids, labels, sites, feature_paths = load_labels(LABEL_JSON)
     
-    # Filter out samples without embedding files
-    print("Checking for missing embedding files...")
-    valid_ids = []
-    valid_labels = []
-    missing_count = 0
-    
-    for id_, label in zip(ids, labels):
-        emb_path = os.path.join(EMBEDDING_DIR, f"{id_}.h5")
-        if os.path.exists(emb_path):
-            valid_ids.append(id_)
-            valid_labels.append(label)
-        else:
-            missing_count += 1
-    
-    if missing_count > 0:
-        print(f"Removed {missing_count} samples without embedding files")
-    
-    ids = valid_ids
-    labels = valid_labels
-    
-    # Filter out classes with too few samples (need at least 2 for stratified split)
-    from collections import Counter
-    label_counts = Counter(labels)
-    min_samples_per_class = 2
-    
-    # Keep only samples from classes with enough samples
-    filtered_ids = []
-    filtered_labels = []
-    for id_, label in zip(ids, labels):
-        if label_counts[label] >= min_samples_per_class:
-            filtered_ids.append(id_)
-            filtered_labels.append(label)
-    
-    removed_count = len(ids) - len(filtered_ids)
-    if removed_count > 0:
-        print(f"Removed {removed_count} samples from classes with < {min_samples_per_class} samples\n")
-    
-    ids = filtered_ids
-    labels = filtered_labels
-    
+    # histology vocab
     unique_labels = sorted(set(labels))
     label_to_idx = {l: i for i, l in enumerate(unique_labels)}
+
+    # Site vocab
+    unique_sites = sorted(set(sites))
+    site_to_idx = {s: i for i, s in enumerate(unique_sites)}
+
+    # Save vocabs to json
+    save_vocabs(label_to_idx, site_to_idx)
+    save_distribution(labels, sites)
     
     # Print dataset statistics
     print(f"\n{'='*60}")
@@ -134,29 +53,25 @@ def train():
     print(f"{'='*60}")
     print(f"Total samples: {len(ids)}")
     print(f"Number of classes: {len(unique_labels)}")
-    print(f"Classes: {unique_labels}")
-    print(f"Class distribution:")
-    label_counts = Counter(labels)
-    for label in unique_labels:
-        count = label_counts[label]
-        print(f"  {label}: {count} ({count/len(labels)*100:.1f}%)")
-    print(f"{'='*60}\n")
+    print(f"Number of sites: {len(unique_sites)}")
 
-    X_train, X_val, y_train, y_val = train_test_split(
-        ids, labels, test_size=VAL_SPLIT, random_state=RANDOM_SEED, stratify=labels
+    # Train val split
+    X_train, X_val, y_train, y_val, sites_train, sites_val, fp_train, fp_val = train_test_split(
+        ids, labels, sites, feature_paths, test_size=VAL_SPLIT, random_state=RANDOM_SEED, stratify=labels
     )
     
     print(f"Train samples: {len(X_train)}")
     print(f"Validation samples: {len(X_val)}")
     print(f"Device: {device}\n")
 
-    train_ds = WSIDataset(X_train, y_train, label_to_idx)
-    val_ds = WSIDataset(X_val, y_val, label_to_idx)
+    # Create dataloaders
+    train_ds = ConceptDatasetwithSite(X_train, y_train, sites_train, fp_train, label_to_idx, site_to_idx)
+    val_ds = ConceptDatasetwithSite(X_val, y_val, sites_val, fp_val, label_to_idx, site_to_idx)
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, num_workers=4, pin_memory=True)
 
-    # Class weights
+    # Class weights calculation
     train_label_counts = Counter(y_train)
     num_classes = len(unique_labels)
     total_samples = len(y_train)
@@ -171,23 +86,25 @@ def train():
     class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
 
     # Infer embedding dim
-    with h5py.File(os.path.join(EMBEDDING_DIR, f"{ids[0]}.h5"), 'r') as f:
+    with h5py.File(feature_paths[0], 'r') as f:
         sample_emb = f['features'][:]
-    model = LinearClassifier(sample_emb.shape[0], len(unique_labels)).to(device)
+    model = ConceptHead(sample_emb.shape[0], len(unique_sites), SITE_EMB_DIM, len(unique_labels)).to(device)
 
+    # Set optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
     criterion = nn.CrossEntropyLoss(
         weight=class_weights,
         label_smoothing=0.05
     )
 
+    # Set LR scheduler
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=EPOCHS
     )
 
+    # History 
     train_losses, val_losses = [], []
-
     best_val_acc = 0.0
     best_epoch = 0
     
@@ -195,10 +112,10 @@ def train():
         model.train()
         epoch_loss = 0.0
 
-        for x, y in tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Train]", leave=False):
-            x, y = x.to(device), y.to(device)
+        for x, site_id, y in tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Train]", leave=False):
+            x, site_id, y = x.to(device), site_id.to(device), y.to(device)
             optimizer.zero_grad()
-            logits = model(x)
+            logits = model(x, site_id)
             loss = criterion(logits, y)
             loss.backward()
             optimizer.step()
@@ -212,9 +129,9 @@ def train():
         preds, gts = [], []
 
         with torch.no_grad():
-            for x, y in tqdm(val_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Val]  ", leave=False):
-                x, y = x.to(device), y.to(device)
-                logits = model(x)
+            for x, site_id, y in tqdm(val_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Val]  ", leave=False):
+                x, site_id, y = x.to(device), site_id.to(device), y.to(device)
+                logits = model(x, site_id)
                 loss = criterion(logits, y)
                 val_loss += loss.item()
 
@@ -274,11 +191,6 @@ def train():
     plt.close()
 
     print("Training complete.")
-    print(f"Saved final model to {OUTPUT_PREFIX}_final.pt")
-    print(f"Saved best model to {OUTPUT_PREFIX}_best.pt")
-    print(f"Saved metrics to {OUTPUT_PREFIX}_metrics.txt")
-    print(f"Saved loss plot to {OUTPUT_PREFIX}_loss.png")
-
 
 # Run script
 if __name__ == "__main__":

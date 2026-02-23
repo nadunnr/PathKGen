@@ -572,6 +572,7 @@ class VisionLanguageModel(nn.Module):
         self,
         visual_features: torch.Tensor,
         prompt: str = None,
+        question: str = None,
         knowledge_text: str = None,
         max_new_tokens: int = 512,
         temperature: float = 0.7,
@@ -593,6 +594,8 @@ class VisionLanguageModel(nn.Module):
         Args:
             visual_features: [1, num_tokens, 768] or [num_tokens, 768] slide embedding
             prompt: Text prompt (if None, uses default from config)
+            question: Per-sample question string (WSI-Bench). If None, falls back to
+                      a generic instruction in the generation prompt.
             knowledge_text: Optional knowledge context
             max_new_tokens: Maximum tokens to generate
             temperature: Sampling temperature (ignored if num_beams > 1)
@@ -618,10 +621,16 @@ class VisionLanguageModel(nn.Module):
         
         # Select appropriate prompt if not provided
         if prompt is None:
+            # Fallback question if none provided
+            q = question if question else "Analyze the whole slide histopathology image and provide a concise pathology diagnosis."
             if knowledge_text is not None:
-                prompt = GENERATION_PROMPT_WITH_KNOWLEDGE.format(knowledge=knowledge_text)
+                prompt = GENERATION_PROMPT_WITH_KNOWLEDGE.format(
+                    knowledge=knowledge_text,
+                    question=q
+                )
             else:
-                prompt = GENERATION_PROMPT_NO_KNOWLEDGE
+                prompt = GENERATION_PROMPT_NO_KNOWLEDGE.format(question=q)
+
         
         # Project visual features (ensure dtype matches)
         visual_features = visual_features.to(self.device).to(self.llm_dtype)
@@ -688,17 +697,22 @@ class VisionLanguageModel(nn.Module):
         # Generate
         outputs = self.llm.generate(**gen_kwargs)
         
-        # Decode (skip special tokens)
+        # Decode output tokens.
+        # NOTE: when using inputs_embeds, llm.generate() returns ONLY the newly
+        # generated tokens (not the prompt), so the output is already the
+        # assistant response only. skip_special_tokens removes <|im_start|> etc.
         generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        
-        # Clean up the output - remove the prompt part
-        # The model might include the system/user parts, we only want the assistant response
+
+        # Safety strip: in case the model echoes any ChatML wrapper despite the
+        # above (e.g. when called via input_ids instead of inputs_embeds),
+        # extract only the assistant portion.
         if "<|im_start|>assistant" in generated_text:
             generated_text = generated_text.split("<|im_start|>assistant")[-1]
-        
-        generated_text = generated_text.strip()
-        
-        return generated_text
+        elif "<|im_end|>" in generated_text:
+            # Strip any trailing end marker
+            generated_text = generated_text.split("<|im_end|>")[0]
+
+        return generated_text.strip()
     
     def to(self, device):
         """

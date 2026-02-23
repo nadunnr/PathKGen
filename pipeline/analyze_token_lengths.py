@@ -28,8 +28,8 @@ except ImportError:
 
 # Configuration
 MODEL_PATH = "/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
-TRAIN_SET = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train_Report_knowledge.json"   
-TEST_SET = "/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test_Report_knowledge.json"
+TRAIN_SET = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
+TEST_SET = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
 
 def analyze_dataset(name, file_path, tokenizer):
     print(f"\nAnalyzing {name} set ({file_path})...")

@@ -57,8 +57,8 @@ def parse_args():
                        help="Dataset format: 'histgen' (nested dict with splits) or 'wsi-bench' (flat list)")
     parser.add_argument("--split", type=str, default="test",
                        help="Dataset split to evaluate on (default: test). Leave empty for wsi-bench format.")
-    parser.add_argument("--feature_key", type=str, default="features",
-                       help="Key in H5 files for slide features")
+    parser.add_argument("--feature_key", type=str, default="tokens",
+                       help="Key in H5 files for slide features (use 'tokens' for TITAN encoder)")
     
     # Model arguments
     parser.add_argument("--llm_path", type=str, default=DEFAULT_LLM_PATH,
@@ -95,6 +95,10 @@ def parse_args():
                        help="Path to save evaluation results (JSON)")
     parser.add_argument("--device", type=str, default=None,
                        help="Device to use (default: cuda if available)")
+    
+    # Knowledge guidance
+    parser.add_argument("--use_knowledge_guidance", action="store_true",
+                       help="Enable knowledge graph guidance for report generation")
     
     return parser.parse_args()
 
@@ -143,15 +147,18 @@ def validate(model, dataloader, device, tokenizer, args):
             del outputs, single_input, single_mask, single_labels
             torch.cuda.empty_cache()
             
-            # Generate prediction
-            # Get knowledge text if available
+            # Get knowledge text and question if available
             knowledge_text = None
-            if 'knowledge_texts' in batch:
+            question_text = None
+            if 'knowledge_texts' in batch and args.use_knowledge_guidance:
                 knowledge_text = batch['knowledge_texts'][i]
+            if 'questions' in batch:
+                question_text = batch['questions'][i]
             
             pred_text = model.generate(
                 visual_features=single_visual,
-                prompt=None,  # Let model auto-select based on knowledge_text
+                prompt=None,
+                question=question_text,
                 knowledge_text=knowledge_text,
                 max_new_tokens=args.max_new_tokens,
                 temperature=args.temperature,
@@ -204,6 +211,11 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.llm_path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+
+    # CRITICAL: Add image marker tokens (must match model.py and training scripts)
+    from config import IMAGE_START_TOKEN, IMAGE_END_TOKEN
+    special_tokens_dict = {'additional_special_tokens': [IMAGE_START_TOKEN, IMAGE_END_TOKEN]}
+    tokenizer.add_special_tokens(special_tokens_dict)
     
     # Create validation dataset
     print("Loading dataset...")
@@ -219,7 +231,8 @@ def main():
         json_path=args.data_json,
         dataset_format=args.dataset_format,
         split=val_split,
-        feature_key=args.feature_key
+        feature_key=args.feature_key,
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     print(f"  Loaded {len(val_dataset)} samples from '{args.split if val_split else 'pre-split file'}' split")
     
@@ -228,7 +241,8 @@ def main():
     data_collator = VLMDataCollator(
         tokenizer=tokenizer,
         dataset_format=args.dataset_format,
-        max_length=args.max_length
+        max_length=args.max_length,
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     # Create validation dataloader

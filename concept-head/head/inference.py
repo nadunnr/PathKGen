@@ -16,84 +16,51 @@ from sklearn.metrics import (
     classification_report,
     confusion_matrix,
 )
+from head import ConceptHead
+from dataset import ConceptDatasetwithSite
+from utils import load_labels
+
 
 # Set-up
-LABEL_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_test_with_site.csv"
-TRAIN_CSV = f"/home/nadun/wd/vlm_histo/concept-head/labelling/without_tgc/variant_train_with_site.csv"
-EMBEDDING_DIR = f"/home/nadun/wd/datasets/wsi_bench/slide_features/test"  # or train for validation
-MODEL_PATH = f"/home/nadun/wd/vlm_histo/concept-head/head/with_site/classifier_with_site_best.pt"
-OUTPUT_PREFIX = f"with_site/with_site_variant_inference_test"
+SPLIT = "test"
+LABEL_JSON = f"/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_{SPLIT}.json"
+TRAIN_JSON = f"/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
+EMBEDDING_DIR = f"/home/nadun/wd/datasets/wsi_bench/slide_features/{SPLIT}"
+MODEL_PATH = f"/home/nadun/wd/vlm_histo/concept-head/head/output/classifier_with_site_best.pt"
+OUTPUT_PREFIX = f"output/classifier_{SPLIT}"
 
 # Hyper-parameters
 BATCH_SIZE = 128
+SITE_EMB_DIM = 16
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
-# Dataset
-class WSIDataset(Dataset):
-    def __init__(self, ids):
-        self.ids = ids
-
-    def __len__(self):
-        return len(self.ids)
-
-    def __getitem__(self, idx):
-        tcga_id = self.ids[idx]
-        emb_path = os.path.join(EMBEDDING_DIR, f"{tcga_id}.h5")
-        
-        with h5py.File(emb_path, 'r') as f:
-            embedding = f['features'][:]
-            embedding = (embedding - embedding.mean()) / (embedding.std() + 1e-6)
-
-        return torch.tensor(embedding, dtype=torch.float32), tcga_id
-
-# Model
-class LinearClassifier(nn.Module):
-    def __init__(self, input_dim, num_classes):
-        super().__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(256, num_classes)
-        )
-
-    def forward(self, x):
-        return self.fc(x)
-
-# Load labels
-def load_ids(csv_path):
-    """Return (ids, gt_labels). gt_labels is None if the column is absent."""
-    ids = []
-    gt_labels = []
-
-    with open(csv_path, "r") as f:
-        reader = csv.DictReader(f)
-        has_label = "final_class" in (reader.fieldnames or [])
-        for row in reader:
-            ids.append(row["tcga_id"])
-            if has_label:
-                gt_labels.append(row["final_class"])
-
-    return ids, (gt_labels if gt_labels else None)
 
 # Inference
 def inference():
     print(f"\n{'='*60}")
-    print(f"Running inference on {LABEL_CSV}")
+    print(f"Running inference on {LABEL_JSON}")
     print(f"{'='*60}\n")
     
-    # Derive class list from the checkpoint output shape + train CSV unique labels
+    # Load checkpoint
     ckpt = torch.load(MODEL_PATH, map_location="cpu")
     num_classes = ckpt["fc.3.weight"].shape[0]
+    num_sites = ckpt["site_emb.weight"].shape[0]
 
-    all_train_labels = sorted(pd.read_csv(TRAIN_CSV)["final_class"].unique())
-    unique_labels = all_train_labels[:num_classes]  # matches classifier.py sorted order
-    idx_to_label = {i: l for i, l in enumerate(unique_labels)}
+    # Build label vocab from train CSV (must match the order used during training)
+    train_ids, train_labels, train_sites, _ = load_labels(TRAIN_JSON)
+    unique_labels = sorted(set(train_labels))
+    label_to_idx  = {l: i for i, l in enumerate(unique_labels)}
+    idx_to_label  = {i: l for i, l in enumerate(unique_labels)}
+
+    # Build site vocab from train CSV (must match the order used during training)
+    unique_sites = sorted(set(train_sites))
+    site_to_idx  = {s: i for i, s in enumerate(unique_sites)}
+
     print(f"Classes (from checkpoint): {num_classes}")
+    print(f"Sites   (from checkpoint): {num_sites}")
 
-    # Load ids and GT labels from CSV
-    ids, gt_labels = load_ids(LABEL_CSV)
+    # Load ids, GT labels, and sites from test CSV
+    ids, gt_labels, sites, feature_paths = load_labels(LABEL_JSON)
     
     # Filter out samples without embedding files
     print("Checking for missing embedding files...")
@@ -110,22 +77,22 @@ def inference():
     if missing_count > 0:
         print(f"Removed {missing_count} samples without embedding files")
 
-    ids = [ids[i] for i in valid_entries]
-    if gt_labels is not None:
-        gt_labels = [gt_labels[i] for i in valid_entries]
+    ids       = [ids[i]       for i in valid_entries]
+    gt_labels = [gt_labels[i] for i in valid_entries]
+    sites     = [sites[i]     for i in valid_entries]
     
     print(f"Total samples: {len(ids)}")
     print(f"Device: {device}\n")
     
     # Create dataset
-    dataset = WSIDataset(ids)
-    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
+    dataset    = ConceptDatasetwithSite(ids, gt_labels, sites, feature_paths, label_to_idx, site_to_idx)
+    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
     
     # Load model
     with h5py.File(os.path.join(EMBEDDING_DIR, f"{ids[0]}.h5"), 'r') as f:
         sample_emb = f['features'][:]
     
-    model = LinearClassifier(sample_emb.shape[0], num_classes).to(device)
+    model = ConceptHead(sample_emb.shape[0], num_sites, SITE_EMB_DIM, num_classes).to(device)
     model.load_state_dict(ckpt)
     model.eval()
     
@@ -133,27 +100,25 @@ def inference():
     
     # Inference
     all_preds = []
-    all_ids = []
 
     with torch.no_grad():
-        for x, tcga_ids in tqdm(dataloader, desc="Inference"):
-            x = x.to(device)
-            logits = model(x)
-            preds = torch.argmax(logits, dim=1)
-
+        for x, site_id, _ in tqdm(dataloader, desc="Inference"):
+            x       = x.to(device)
+            site_id = site_id.to(device)
+            logits  = model(x, site_id)
+            preds   = torch.argmax(logits, dim=1)
             all_preds.extend(preds.cpu().numpy())
-            all_ids.extend(tcga_ids)
     
     # Save predictions in ground truth format
-    output_csv = f"{OUTPUT_PREFIX}_pred.csv"
-    metrics_txt = f"{OUTPUT_PREFIX}_metrics.txt"
+    output_csv  = f"{OUTPUT_PREFIX}_pred.csv"
+    metrics_txt = f"{OUTPUT_PREFIX}_inference_metrics.txt"
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)
     pred_labels = [idx_to_label[p] for p in all_preds]
 
     with open(output_csv, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["tcga_id", "predicted_label"])
-        for tcga_id, pred_label in zip(all_ids, pred_labels):
+        for tcga_id, pred_label in zip(ids, pred_labels):
             writer.writerow([tcga_id, pred_label])
 
     print(f"\nInference complete.")
@@ -161,13 +126,13 @@ def inference():
 
     # Metrics
     if gt_labels is not None:
-        acc = accuracy_score(gt_labels, pred_labels)
+        acc      = accuracy_score(gt_labels, pred_labels)
         macro_f1 = f1_score(gt_labels, pred_labels, average="macro", zero_division=0)
-        report = classification_report(gt_labels, pred_labels, zero_division=0)
+        report   = classification_report(gt_labels, pred_labels, zero_division=0)
 
         with open(metrics_txt, "w") as mf:
             mf.write(f"{'='*60}\n")
-            mf.write(f"Metrics)\n")
+            mf.write(f"Metrics\n")
             mf.write(f"{'='*60}\n\n")
             mf.write(f"  Accuracy  : {acc * 100:.2f}%\n")
             mf.write(f"  Macro-F1  : {macro_f1:.4f}\n\n")

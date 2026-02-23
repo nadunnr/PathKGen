@@ -64,8 +64,9 @@ def parse_args():
     parser.add_argument("--slidechat_checkpoint", type=str,
                        default=DEFAULT_SLIDECHAT_CHECKPOINT,
                        help="Path to SlideChat weights")
-    parser.add_argument("--stage1_checkpoint", type=str, required=True,
-                       help="Path to Stage 1 checkpoint (for projection weights)")
+    parser.add_argument("--stage1_checkpoint", type=str, default=None,
+                       help="Path to Stage 1 checkpoint (for projection weights). "
+                            "Required unless --init_from is provided.")
     parser.add_argument("--visual_dim", type=int, default=DEFAULT_VISUAL_DIM,
                        help="Dimension of slide features")
     parser.add_argument("--num_visual_tokens", type=int, default=DEFAULT_NUM_VISUAL_TOKENS,
@@ -119,7 +120,11 @@ def parse_args():
     parser.add_argument("--save_every", type=int, default=1,
                        help="Save checkpoint every N epochs")
     parser.add_argument("--resume_from", type=str, default=None,
-                       help="Resume training from Stage 2 checkpoint")
+                       help="Resume training from Stage 2 checkpoint (restores epoch + optimizer)")
+    parser.add_argument("--init_from", type=str, default=None,
+                       help="Warm-start: load projection + LoRA weights from a previous Stage 2 checkpoint. "
+                            "Epoch resets to 0, optimizer is fresh. Skips --stage1_checkpoint load. "
+                            "Useful for rapid prototyping with new data/hyperparams.")
     
     # Early stopping
     parser.add_argument("--early_stopping", action="store_true",
@@ -138,6 +143,10 @@ def parse_args():
                        help="Random seed")
     parser.add_argument("--log_every", type=int, default=10,
                        help="Log every N steps")
+    parser.add_argument("--output_results_dir", type=str,
+                       default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "results"),
+                       help="Directory to save per-epoch prediction/reference JSONL files")
+    
     
     # NLU Score Improvement Arguments
     parser.add_argument("--label_smoothing", type=float, default=0.0,
@@ -159,6 +168,7 @@ def parse_args():
     parser.add_argument("--no_repeat_ngram_size", type=int, default=3,
                        help="Size of n-grams that cannot repeat during generation")   
     return parser.parse_args()
+
 
 
 def set_seed(seed: int):
@@ -446,6 +456,7 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
     num_samples = 0
     all_predictions = []
     all_references = []
+    all_ids = []
     
     pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]")
     
@@ -497,15 +508,19 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
                 if hasattr(model.llm, 'gradient_checkpointing_disable'):
                     model.llm.gradient_checkpointing_disable()
                 
-                # Get knowledge text if available
+                # Get knowledge text and question if available
                 knowledge_text = None
+                question_text = None
                 if 'knowledge_texts' in batch and args.use_knowledge_guidance:
                     knowledge_text = batch['knowledge_texts'][i]
+                if 'questions' in batch:
+                    question_text = batch['questions'][i]
                 
                 # Use beam search if configured for better NLU metrics
                 pred_text = model.generate(
                     visual_features=single_visual,
                     prompt=None,  # Let model auto-select based on knowledge_text
+                    question=question_text,
                     knowledge_text=knowledge_text,
                     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
                     temperature=0.0,  # Greedy/beam search for evaluation
@@ -515,11 +530,15 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
                     no_repeat_ngram_size=getattr(args, 'no_repeat_ngram_size', 3)
                 )
                 all_predictions.append(pred_text)
-                
+
                 # Extract ground truth report from labels
                 label_ids = labels[i][labels[i] != -100]
                 ref_text = extract_report_from_labels(tokenizer, label_ids)
                 all_references.append(ref_text)
+
+                # Collect sample ID (tcga_id)
+                sample_id = batch['ids'][i] if 'ids' in batch else str(len(all_ids))
+                all_ids.append(sample_id)
                 
                 # Re-enable gradient checkpointing if needed
                 if hasattr(model.llm, 'gradient_checkpointing_enable') and args.gradient_checkpointing:
@@ -536,12 +555,29 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
         pbar.set_postfix({'val_loss': f'{avg_batch_loss:.4f}'})
     
     avg_loss = total_loss / num_samples
-    
+
     metrics = {}
     if len(all_predictions) > 0:
         from metrics import compute_metrics as calc_metrics
         metrics = calc_metrics(all_predictions, all_references)
-    
+
+        # Save model.generate() outputs as formatted JSON for easy comparison
+        import json
+        results_dir = args.output_results_dir
+        os.makedirs(results_dir, exist_ok=True)
+        results_path = os.path.join(results_dir, f'stage2_val_epoch{epoch+1}.json')
+        records = [
+            {
+                'tcga_id':    tcga_id,
+                'prediction': pred,
+                'reference':  ref,
+            }
+            for tcga_id, pred, ref in zip(all_ids, all_predictions, all_references)
+        ]
+        with open(results_path, 'w') as f:
+            json.dump(records, f, indent=4)
+        print(f"  [Results] Saved {len(records)} entries → {results_path}")
+
     return avg_loss, metrics
 
 
@@ -584,8 +620,7 @@ def evaluate_best_model(checkpoint_path, args, device):
         tokenizer=tokenizer,
         dataset_format=args.dataset_format,
         max_length=args.max_length,
-        use_knowledge_guidance=args.use_knowledge_guidance,
-        max_knowledge_tokens=args.max_knowledge_tokens
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     # Create validation dataloader
@@ -667,7 +702,11 @@ def main():
     exp_name = f"{timestamp}_vt{args.num_visual_tokens}_ml{args.max_length}_e{args.epochs}_bs{args.batch_size}"
     exp_dir = os.path.join(args.output_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
-    
+
+    # Mirror experiment name in results dir so each run gets its own folder
+    args.output_results_dir = os.path.join(args.output_results_dir, exp_name)
+    os.makedirs(args.output_results_dir, exist_ok=True)
+
     print(f"\n{'='*60}")
     print(f"Experiment directory: {exp_dir}")
     print(f"{'='*60}")
@@ -744,8 +783,7 @@ def main():
         tokenizer=tokenizer,
         dataset_format=args.dataset_format,
         max_length=args.max_length,
-        use_knowledge_guidance=args.use_knowledge_guidance,
-        max_knowledge_tokens=args.max_knowledge_tokens
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     # Create dataloaders
@@ -784,15 +822,34 @@ def main():
         device=device
     )
     
-    # Load Stage 1 projection weights
-    print(f"\nLoading Stage 1 projection weights from: {args.stage1_checkpoint}")
-    checkpoint = torch.load(args.stage1_checkpoint, map_location=device)
-    model.projection.load_state_dict(checkpoint['projection_state_dict'])
-    print("✓ Projection weights loaded from Stage 1")
-    
-    # Free checkpoint memory immediately
-    del checkpoint
-    torch.cuda.empty_cache()
+    # ── Load initial weights for Stage 2 ────────────────────────────────
+    if args.init_from is not None:
+        # Warm-start from a previous Stage 2 checkpoint (projection + LoRA)
+        print(f"\n[Warm-start] Loading Stage 2 weights from: {args.init_from}")
+        ckpt = torch.load(args.init_from, map_location='cpu')
+        if 'projection_state_dict' in ckpt:
+            model.projection.load_state_dict(ckpt['projection_state_dict'])
+            print("  ✓ Projection weights loaded")
+        else:
+            raise KeyError(f"'projection_state_dict' not found. Keys: {list(ckpt.keys())}")
+        if 'lora_state_dict' in ckpt:
+            model.llm.load_state_dict(ckpt['lora_state_dict'], strict=False)
+            print("  ✓ LoRA weights loaded")
+        else:
+            print("  ! No 'lora_state_dict' found — LoRA starts from random init")
+        print("  [Epoch resets to 0, optimizer is fresh]")
+        del ckpt
+        torch.cuda.empty_cache()
+    elif args.stage1_checkpoint is not None:
+        # Standard: load only projection from Stage 1 checkpoint
+        print(f"\nLoading Stage 1 projection weights from: {args.stage1_checkpoint}")
+        checkpoint = torch.load(args.stage1_checkpoint, map_location=device)
+        model.projection.load_state_dict(checkpoint['projection_state_dict'])
+        print("✓ Projection weights loaded from Stage 1")
+        del checkpoint
+        torch.cuda.empty_cache()
+    else:
+        raise ValueError("Either --stage1_checkpoint or --init_from must be provided.")
     
     total_params, trainable_params = model.count_parameters()
     print(f"\nModel parameters:")

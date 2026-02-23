@@ -16,7 +16,7 @@ def split_compound_class(tcga_id: str, project_name: str, report_text: str) -> s
     print(f"W: Exact class not decided for {tcga_id}")
     return None
 
-def get_histology(item: dict) -> str | None:
+def get_histology(item):
     """Extract histology label from a WSI-Bench item using the lookup rules."""
     tcga_id = item.get('tcga_id', '')
     project = item.get('project_name', '')
@@ -107,18 +107,27 @@ def filter_wsi_bench(input_file, output_dir, tasks, feature_dir, split_ratio, se
         # Histology extraction for Report task
         if "Report" in tasks:
             print(f"I: Extracting histology labels for Report task...")
-            data_with_hist = []
-            skipped = 0
+            # Annotate histology for each item first (safe single pass)
             for item in data:
-                histology = get_histology(item)
+                item['_histology'] = get_histology(item)
+
+            # Now filter out items where histology could not be determined
+            null_histology = 0
+            kept_data = []
+            for item in data:
+                histology = item.pop('_histology')
                 if histology is None:
-                    print(f"W: Skipping {item.get('tcga_id', '?')} - histology could not be determined")
-                    skipped += 1
-                    continue
-                item['histology'] = histology
-                data_with_hist.append(item)
-            data = data_with_hist
-            print(f"I: Histology extraction complete. Kept: {len(data)}, Skipped: {skipped}")
+                    tcga_id = item.get('tcga_id', '?')
+                    print(f"W: Could not determine histology for {tcga_id} - skipping")
+                    with open("skipped_samples.txt", "a") as f:
+                        f.write(f"{tcga_id}\n")
+                    null_histology += 1
+                    print(f"I: Removed item {tcga_id} - Null histology")
+                else:
+                    item['histology'] = histology
+                    kept_data.append(item)
+            data = kept_data
+            print(f"I: Histology extraction complete. Total: {len(data)}, Null histology: {null_histology}")
         
         # Save task-filtered data
         print(f"I: Saving task-filtered data to {task_only_file}...")

@@ -30,13 +30,13 @@ Please analyze this whole slide image and provide a detailed diagnostic report d
 
 # Training prompt with knowledge guidance (HistGen format)
 TRAINING_PROMPT_WITH_KNOWLEDGE = """<|im_start|>system
-You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.
-
-Generic knowledge regarding histology type (96.5%_accurate). The site is exact.
-{knowledge}
-Use to help, but verify visually.<|im_end|>
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
+Generic knowledge regarding histology type (96.5% accurate). The site is exact.
+{knowledge}
+Use to help, but verify visually.
+
 Please analyze this whole slide image and provide a detailed diagnostic report describing the key histopathological features and diagnosis.<|im_end|>
 <|im_start|>assistant
 {report}<|im_end|>"""
@@ -56,13 +56,13 @@ You are a pathology assistant specialized in analyzing whole slide images of tis
 
 # WSI-Bench with knowledge guidance
 TRAINING_PROMPT_WSI_BENCH_KNOWLEDGE = """<|im_start|>system
-You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.
-
-Generic knowledge regarding histology type (96.5% accurate). The site is exact.
-{knowledge}
-Use to help, but verify visually.<|im_end|>
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
+Generic knowledge regarding histology type (97.52% accurate). The site is exact.
+{knowledge}
+Use to help, but verify visually.
+
 {question}<|im_end|>
 <|im_start|>assistant
 {answer}<|im_end|>"""
@@ -90,24 +90,23 @@ HISTGEN_DATASET = "/home/sandun/nadun/data/dataset/histgen_dataset.json"  # Exam
 
 # Without knowledge guidance
 GENERATION_PROMPT_NO_KNOWLEDGE = """<|im_start|>system
-You are an expert pathology AI assistant specialized in analyzing whole slide images (WSI) from histopathology specimens. You generate accurate, concise diagnostic reports based on visual analysis.<|im_end|>
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
-Analyze the whole slide histopathology image shown above and provide a concise single-paragraph pathology diagnosis.<|im_end|>
+{question}<|im_end|>
 <|im_start|>assistant
 """
 
 # With knowledge guidance (includes {knowledge} placeholder)
 GENERATION_PROMPT_WITH_KNOWLEDGE = """<|im_start|>system
-You are an expert pathology AI assistant specialized in analyzing whole slide images (WSI) from histopathology specimens. You integrate medical knowledge with visual analysis to generate accurate, concise diagnostic reports.<|im_end|>
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
 <|im_start|>user
 <image_start><image_end>
-
-Generic knowledge regarding histology type (96.5% accurate). The site is exact.
+Generic knowledge regarding histology type (97.52% accurate). The site is exact.
 {knowledge}
 Use to help, but verify visually.
 
-Generate a concise single-paragraph pathology diagnosis.<|im_end|>
+{question}<|im_end|>
 <|im_start|>assistant
 """
 
@@ -122,46 +121,42 @@ GENERATION_PROMPT = GENERATION_PROMPT_NO_KNOWLEDGE
 def extract_report_from_labels(tokenizer, label_ids):
     """
     Extract the ground truth report text from tokenized labels.
-    
-    The labels contain the full training prompt in ChatML format:
-    <|im_start|>system...  
-    <|im_start|>user...
-    <|im_start|>assistant
-    REPORT_TEXT<|im_end|>
-    
-    This function extracts just the REPORT_TEXT part for NLU metric evaluation.
-    
+
+    After label masking in VLMDataCollator, label_ids passed here contains
+    ONLY the answer (T-answer) tokens because the caller filters:
+        label_ids = labels[i][labels[i] != -100]
+    Everything before <|im_start|>assistant is masked to -100, so the
+    primary decode path is simply a clean skip_special_tokens decode.
+
     Args:
         tokenizer: HuggingFace tokenizer
-        label_ids: Tensor of label token IDs (with -100 already filtered out)
-        
+        label_ids: 1-D Tensor of non-masked label token IDs (-100 already removed)
+
     Returns:
-        str: The ground truth report text
+        str: Clean ground truth report text (T-answer only)
     """
-    # Decode full text (keep special tokens to find markers)
+    # Safety net: decode keeping special tokens so we can detect ChatML markers.
+    # This handles the edge case where label masking wasn't applied and the full
+    # prompt survives. We look for <|im_start|>assistant and extract only what
+    # follows it (up to the closing <|im_end|>).
     full_text = tokenizer.decode(label_ids, skip_special_tokens=False)
-    
-    # Find assistant response section
+
     assistant_marker = "<|im_start|>assistant"
     end_marker = "<|im_end|>"
-    
+
     if assistant_marker in full_text:
-        # Split at assistant marker and take everything after
-        parts = full_text.split(assistant_marker, 1)
-        if len(parts) > 1:
-            after_assistant = parts[1]
-            
-            # Find the end marker
-            if end_marker in after_assistant:
-                report = after_assistant.split(end_marker, 1)[0]
-                return report.strip()
-            else:
-                # No end marker found, return everything after assistant
-                return after_assistant.strip()
-    
-    # Fallback: decode without special tokens and return
-    # This handles old format or if markers not found
+        # Full prompt is present — extract the assistant portion only
+        after_assistant = full_text.split(assistant_marker, 1)[-1]
+        if end_marker in after_assistant:
+            report = after_assistant.split(end_marker, 1)[0]
+        else:
+            report = after_assistant
+        return report.strip()
+
+    # Primary path (normal case): label masking already removed the prompt.
+    # skip_special_tokens=True strips any remaining <|im_end|> cleanly.
     return tokenizer.decode(label_ids, skip_special_tokens=True).strip()
+
 
 
 # ============================================================================
@@ -193,8 +188,6 @@ DEFAULT_REPETITION_PENALTY = 1.2
 
 # Knowledge guidance settings
 DEFAULT_USE_KNOWLEDGE_GUIDANCE = False
-DEFAULT_MAX_KNOWLEDGE_TOKENS = 64
-
 # ============================================================================
 # PATH CONFIGURATION
 # ============================================================================

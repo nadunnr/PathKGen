@@ -13,8 +13,11 @@ echo "=================================================================="
 WSI_BENCH_TRAIN="/home/sandun/nadun/data/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
 WSI_BENCH_TEST="/home/sandun/nadun/data/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
 
-KNOWLEDGE_TRAIN_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-train_Report_knowledge.json"
-KNOWLEDGE_TEST_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/WSI-Bench-test_Report_knowledge.json"
+KNOWLEDGE_TRAIN_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
+KNOWLEDGE_TEST_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+
+DEFAULT_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
+UMLS_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"
 
 # Configuration
 OUTPUT_DIR="/home/sandun/nadun/histo_vlm/checkpoints/stage2_wsi_bench"
@@ -29,6 +32,7 @@ python train_stage2.py \
     --test_json "$WSI_BENCH_TEST" \
     --dataset_format wsi-bench \
     --stage1_checkpoint "$STAGE1_CHECKPOINT" \
+    --output_results_dir "$OUTPUT_RESULTS_DIR" \
     --compute_metrics_during_training \
     --epochs 3 \
     --batch_size 1 \

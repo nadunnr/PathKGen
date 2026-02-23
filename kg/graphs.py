@@ -196,7 +196,7 @@ class Neo4jQuery:
         with self.driver.session(database=self.database) as session:
             result = session.run("""
                 MATCH (c:Concept {cui: $cui})
-                RETURN c.cui as cui, c.name as name, c.tui as semantic_type
+                RETURN c.cui as cui, c.name as name, c.tui as tui, c.tui_name as semantic_type
             """, cui=cui)
             
             entity = result.single()

@@ -22,6 +22,16 @@ class Neo4jLoader:
     
     def close(self):
         self.driver.close()
+
+    def get_name_for_cui(self, cui):
+        """Helper function to get concept name for a given CUI"""
+        with self.driver.session(database=self.database) as session:
+            result = session.run("""
+                MATCH (c:Concept {cui: $cui})
+                RETURN c.name as name
+            """, cui=cui)
+            record = result.single()
+            return record["name"] if record else None
     
     def create_constraints(self):
         """Create uniqueness constraint on CUI to improve performance"""
@@ -196,7 +206,7 @@ class Neo4jQuery:
         with self.driver.session(database=self.database) as session:
             result = session.run("""
                 MATCH (c:Concept {cui: $cui})
-                RETURN c.cui as cui, c.name as name
+                RETURN c.cui as cui, c.name as name, c.tui as semantic_type
             """, cui=cui)
             
             entity = result.single()
@@ -429,9 +439,11 @@ if __name__ == '__main__':
     
     NODES_CSV = "/home/nadun/wd/datasets/UMLS_sql/neo4jdb/v5/nodes.csv"
     RELATIONSHIPS_CSV = "/home/nadun/wd/datasets/UMLS_sql/neo4jdb/v5/relationships.csv"
+
+    
     
 
-#     loader = Neo4jLoader(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD, database="jan27")  
+#     loader = Neo4jLoader(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)  
 #     loader.create_constraints()
 #     # 
 #     loader.load_nodes(NODES_CSV, batch_size=100000)

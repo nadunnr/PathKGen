@@ -107,7 +107,10 @@ def parse_args():
     parser.add_argument("--save_every", type=int, default=2,
                        help="Save checkpoint every N epochs")
     parser.add_argument("--resume_from", type=str, default=None,
-                       help="Resume training from checkpoint")
+                       help="Resume training from checkpoint (restores epoch + optimizer)")
+    parser.add_argument("--init_from", type=str, default=None,
+                       help="Warm-start: load projection weights from a previous Stage 1 checkpoint "
+                            "(epoch resets to 0, optimizer is fresh). Useful for rapid prototyping.")
     
     # Early stopping
     parser.add_argument("--early_stopping", action="store_true",
@@ -126,8 +129,12 @@ def parse_args():
                        help="Random seed")
     parser.add_argument("--log_every", type=int, default=10,
                        help="Log every N steps")
+    parser.add_argument("--output_results_dir", type=str,
+                       default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "results"),
+                       help="Directory to save per-epoch prediction/reference JSONL files")
     
     return parser.parse_args()
+
 
 
 def set_seed(seed: int):
@@ -249,18 +256,22 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
                 if hasattr(model.llm, 'gradient_checkpointing_disable'):
                     model.llm.gradient_checkpointing_disable()
                 
-                # Get knowledge text if available
+                # Get knowledge text and question if available
                 knowledge_text = None
+                question_text = None
                 if 'knowledge_texts' in batch and args.use_knowledge_guidance:
                     knowledge_text = batch['knowledge_texts'][i]
+                if 'questions' in batch:
+                    question_text = batch['questions'][i]
                 
                 pred_text = model.generate(
                     visual_features=single_visual,
-                    prompt=None,  # Let model auto-select based on knowledge_text
+                    prompt=None,
+                    question=question_text,
                     knowledge_text=knowledge_text,
                     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
-                    temperature=0.0,  # Greedy decoding for evaluation (SOTA standard)
-                    top_p=1.0         # No nucleus sampling for deterministic output
+                    temperature=0.0,
+                    top_p=1.0
                 )
                 all_predictions.append(pred_text)
                 
@@ -284,13 +295,14 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
         pbar.set_postfix({'val_loss': f'{avg_batch_loss:.4f}'})
     
     avg_loss = total_loss / num_samples
-    
+
     metrics = {}
     if len(all_predictions) > 0:
         from metrics import compute_metrics as calc_metrics
         metrics = calc_metrics(all_predictions, all_references)
-    
+
     return avg_loss, metrics
+
 
 
 @torch.no_grad()
@@ -331,8 +343,7 @@ def evaluate_best_model(checkpoint_path, args, device):
     data_collator = VLMDataCollator(
         tokenizer=tokenizer,
         max_length=args.max_length,
-        use_knowledge_guidance=args.use_knowledge_guidance,
-        max_knowledge_tokens=args.max_knowledge_tokens
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     # Create validation dataloader
@@ -484,8 +495,7 @@ def main():
         tokenizer=tokenizer,
         dataset_format=args.dataset_format,
         max_length=args.max_length,
-        use_knowledge_guidance=args.use_knowledge_guidance,
-        max_knowledge_tokens=args.max_knowledge_tokens
+        use_knowledge_guidance=args.use_knowledge_guidance
     )
     
     # Create dataloaders
@@ -540,11 +550,25 @@ def main():
     num_training_steps = len(train_loader) * args.epochs // args.gradient_accumulation_steps
     scheduler = CosineAnnealingLR(optimizer, T_max=num_training_steps, eta_min=1e-6)
     
-    # Resume from checkpoint if specified
+    # ── Warm-start: load projection weights only (epoch + optimizer reset) ──────
+    if args.init_from is not None:
+        print(f"\n[Warm-start] Loading projection weights from: {args.init_from}")
+        ckpt = torch.load(args.init_from, map_location='cpu')
+        if 'projection_state_dict' in ckpt:
+            model.projection.load_state_dict(ckpt['projection_state_dict'])
+            print("  ✓ Projection weights loaded (epoch resets to 0, optimizer is fresh)")
+        else:
+            raise KeyError(f"'projection_state_dict' not found in {args.init_from}. "
+                           f"Keys: {list(ckpt.keys())}")
+        del ckpt
+        torch.cuda.empty_cache()
+
+    # ── Resume from checkpoint (restores epoch + optimizer) ──────────────────
+    # Note: resume_from takes priority over init_from for epoch/optimizer state
     start_epoch = 0
     best_val_loss = float('inf')
     best_epoch = -1
-    
+
     if args.resume_from is not None:
         print(f"\nResuming from checkpoint: {args.resume_from}")
         start_epoch, optimizer_state = model.load_checkpoint(args.resume_from, load_optimizer=True)
