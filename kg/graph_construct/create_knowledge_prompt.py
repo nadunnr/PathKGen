@@ -10,11 +10,10 @@ with open(descriptions_path) as f:
     descriptions = json.load(f)
     print(f"Loaded {len(descriptions)} descriptions from {descriptions_path}")
 
-
-
-
 histologies = {}
+data = {}
 df = pd.read_csv(morphs_path)
+
 for _, row in df.iterrows():
     histology = row['reference_entity']
     relation = row['relation_name']
@@ -35,15 +34,19 @@ r = {'found_in': 'found in',
      'has_mitotic_activity': 'has mitotic activity'}
 
 
-
 for histology, features in histologies.items():
-    paragraph_parts = []
+    knowledge_prompt = f"<knowledge>\nHistology: {histology}\n"
     for relation, feature_list in features.items():
         if feature_list:
-            paragraph_parts.append(f"{r.get(relation, relation)}: {', '.join(feature_list)}.")
-    paragraph = " ".join(paragraph_parts)
-    print(f"Histology: {histology}\nFeatures Paragraph: {paragraph}\n")
-    # breakpoint()
+            # paragraph_parts.append(f"{r.get(relation, relation)}: {', '.join(feature_list)}.")
+            knowledge_prompt += f"{r.get(relation, relation)}: {', '.join(feature_list)}\n"
+    knowledge_prompt += "</knowledge>"
+    print(f"Histology: {histology}\n{knowledge_prompt}\n")
+    data[histology] = knowledge_prompt
+
+with open(output_path, 'w') as f:
+    json.dump(data, f, indent=2)
+print(f"Saved histology descriptions with features to {output_path}")
 
 
 

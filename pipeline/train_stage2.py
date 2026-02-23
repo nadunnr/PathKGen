@@ -12,6 +12,7 @@ Usage:
 """
 
 import os
+import math
 import argparse
 import json
 from datetime import datetime
@@ -24,11 +25,12 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from transformers import AutoTokenizer
 
 # Local imports
-from model import VisionLanguageModel, compute_rdrop_loss
+from model import VisionLanguageModel
+from losses import compute_rdrop_loss
 from dataset import WSI_Report_Dataset
 from data_collator import VLMDataCollator
 from config import (GENERATION_PROMPT, TRAINING_PROMPT_TEMPLATE,
-                    DEFAULT_LLM_PATH, DEFAULT_SLIDECHAT_CHECKPOINT, 
+                    DEFAULT_LLM_PATH, DEFAULT_SLIDECHAT_CHECKPOINT,
                     DEFAULT_DATA_JSON, DEFAULT_STAGE2_OUTPUT,
                     DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS,
                     DEFAULT_MAX_LENGTH, DEFAULT_MAX_NEW_TOKENS,
@@ -182,115 +184,106 @@ def set_seed(seed: int):
 
 
 def compute_bleu_penalty_loss(
-    model, 
-    visual_features, 
-    labels, 
-    tokenizer, 
+    model,
+    visual_features,
+    labels,
+    tokenizer,
     input_ids,
     attention_mask,
     bleu_metric='bleu4',
     max_gen_tokens=128,
-    baseline_bleu=None,  # Now dynamic
-    num_samples=1  # For minimum risk training
+    baseline_bleu=None,
+    questions=None,       # Bug 1 fix: per-sample question strings
+    knowledge_texts=None, # Bug 1 fix: per-sample knowledge strings
 ):
     """
-    Compute BLEU-aware loss using Minimum Risk Training (MRT) style objective.
-    
-    This is more stable than REINFORCE because:
-    1. Uses greedy decoding (matches evaluation)
-    2. Dynamic baseline (running average)
-    3. Direct reward weighting instead of policy gradients
-    
-    The loss encourages the model to assign higher probability to 
-    sequences that achieve higher BLEU scores.
-    
+    Compute BLEU-weighted CE loss (hard-example mining style).
+
+    Architecture:
+        - Generate greedily for each sample (matches eval)
+        - Compute BLEU(generated, reference)
+        - Weight = 0.5 + sigmoid(−5 × (bleu − baseline))) → [0.5, 1.5]
+          (high BLEU → weight < 1; low BLEU → weight > 1, harder sample gets more CE)
+        - Return mean(weight_i × CE_i) — replaces normal CE for this batch
+
     Args:
-        model: The VLM model
-        visual_features: Visual features tensor [batch_size, num_tokens, visual_dim]
-        labels: Ground truth label ids [batch_size, seq_len]
-        tokenizer: Tokenizer for decoding
-        input_ids: Input token ids for the prompt
-        attention_mask: Attention mask for the prompt
-        bleu_metric: Which BLEU metric to use
-        max_gen_tokens: Maximum tokens to generate
-        baseline_bleu: Dynamic baseline (pass running average, or None for first call)
-        num_samples: Number of samples for MRT (1 = simpler reward-weighted MLE)
-        
+        model:           VisionLanguageModel
+        visual_features: [batch, num_tokens, visual_dim]
+        labels:          [batch, seq_len] — -100 masked to CE targets
+        tokenizer:       for decoding references
+        input_ids:       [batch, seq_len] prompt token ids
+        attention_mask:  [batch, seq_len]
+        bleu_metric:     'bleu1' .. 'bleu4'
+        max_gen_tokens:  generation budget
+        baseline_bleu:   EMA baseline BLEU; None → initialise at 0.2
+        questions:       list[str | None] — per-sample question text
+        knowledge_texts: list[str | None] — per-sample knowledge text
+
     Returns:
-        bleu_loss: Differentiable loss term
-        avg_bleu: Average BLEU score for this batch (for logging and baseline update)
+        (bleu_loss, avg_bleu) or (None, 0.0) when all samples are skipped
     """
     batch_size = visual_features.shape[0]
     bleu_scores = []
     weighted_losses = []
-    
-    # Process each sample in the batch
+    current_baseline = baseline_bleu if baseline_bleu is not None else 0.2
+
+    model.eval()
     for i in range(batch_size):
         single_visual = visual_features[i:i+1]
         single_labels = labels[i]
         single_input_ids = input_ids[i:i+1]
         single_attention_mask = attention_mask[i:i+1]
-        
-        # Extract ground truth reference text from labels
+
+        # Decode reference
         label_ids = single_labels[single_labels != -100]
         reference_text = tokenizer.decode(label_ids, skip_special_tokens=True)
-        
-        # Skip if reference is too short
         if len(reference_text.split()) < 3:
-            continue
-        
-        # Generate with GREEDY decoding (matches evaluation!)
+            continue  # too short to compute meaningful BLEU
+
+        # BUG 1 FIX: use the actual per-sample question/knowledge so the
+        # generation matches the evaluation prompt exactly.
+        q_text = questions[i] if questions is not None else None
+        k_text = knowledge_texts[i] if knowledge_texts is not None else None
+
         with torch.no_grad():
-            model.eval()
             generated_text = model.generate(
                 visual_features=single_visual,
-                prompt=None,
+                prompt=None,             # auto-select based on dataset
+                question=q_text,         # per-sample question
+                knowledge_text=k_text,   # per-sample knowledge
                 max_new_tokens=max_gen_tokens,
-                temperature=0.0,  # Greedy - matches evaluation
-                num_beams=1
+                temperature=0.0,         # greedy — matches eval
+                num_beams=1,
             )
-            model.train()
-        
-        # Compute BLEU score (reward)
+
         bleu_score = compute_bleu_penalty(generated_text, reference_text, metric=bleu_metric)
         bleu_scores.append(bleu_score)
-        
-        # Compute reward relative to baseline
-        current_baseline = baseline_bleu if baseline_bleu is not None else 0.2
+
+        # Hard-example weight: inverse sigmoid of (bleu - baseline)
+        # reward < 0  →  weight closer to 1.5  (focus on this sample)
+        # reward > 0  →  weight closer to 0.5  (sample is already good)
         reward = bleu_score - current_baseline
-        
-        # Compute reward weight (exponential scaling for stability)
-        # Higher BLEU → lower weight on CE loss (model is doing well)
-        # Lower BLEU → higher weight on CE loss (model needs more training on this sample)
-        # This is like "hard example mining" weighted by BLEU
-        import math
-        # Sigmoid scaling: maps reward to [0.5, 2.0] weight range
-        # reward < 0 → weight > 1 (focus more on this sample)
-        # reward > 0 → weight < 1 (sample is already good)
-        weight = 1.0 / (1.0 + math.exp(5.0 * reward))  # Inverse sigmoid
-        weight = 0.5 + weight  # Map to [0.5, 1.5] range
-        
-        # Forward pass to get CE loss on ground truth
+        weight = 0.5 + 1.0 / (1.0 + math.exp(5.0 * reward))  # → [0.5, 1.5]
+
+        model.train()
         outputs = model(
             visual_features=single_visual,
             input_ids=single_input_ids,
             attention_mask=single_attention_mask,
-            labels=single_labels.unsqueeze(0)
+            labels=single_labels.unsqueeze(0),
         )
-        
-        # Weight the CE loss by inverse reward (focus on hard examples)
-        weighted_loss = weight * outputs['loss']
-        weighted_losses.append(weighted_loss)
-        
+        model.eval()
+
+        weighted_losses.append(weight * outputs['loss'])
         del outputs
-    
-    if len(weighted_losses) == 0:
-        return torch.tensor(0.0, device=visual_features.device, requires_grad=True), 0.0
-    
-    # Average the weighted losses
+
+    model.train()  # ensure training mode before returning
+
+    if not weighted_losses:
+        return None, 0.0   # signal: no valid samples → fall back to ce_loss
+
     bleu_loss = torch.stack(weighted_losses).mean()
-    avg_bleu = sum(bleu_scores) / len(bleu_scores) if bleu_scores else 0.0
-    
+    avg_bleu = sum(bleu_scores) / len(bleu_scores)
     return bleu_loss, avg_bleu
 
 
@@ -368,11 +361,15 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device, to
             ce_loss = outputs['loss']
             del outputs
         
-        # Compute BLEU penalty if enabled (now with hard example mining)
-        bleu_penalty = torch.tensor(0.0, device=device, requires_grad=False)
+        # Compute BLEU-weighted CE penalty if enabled (hard-example mining).
+        # Only evaluated every gradient_accumulation_steps to amortise generate() cost.
+        bleu_computed = False   # Bug 2 fix: explicit flag instead of requires_grad check
+        bleu_penalty = None
         if args.use_bleu_penalty and tokenizer is not None:
-            # Compute BLEU penalty every gradient accumulation cycle to save compute
             if (step + 1) % args.gradient_accumulation_steps == 0 or step == 0:
+                # Bug 1 fix: pass per-sample question/knowledge to generate()
+                questions_batch = batch.get('questions', None)
+                knowledge_batch = batch.get('knowledge_texts', None)
                 bleu_penalty, avg_bleu = compute_bleu_penalty_loss(
                     model=model,
                     visual_features=visual_features,
@@ -382,26 +379,22 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device, to
                     attention_mask=attention_mask,
                     bleu_metric=args.bleu_metric,
                     max_gen_tokens=128,
-                    baseline_bleu=running_bleu_baseline  # Dynamic baseline!
+                    baseline_bleu=running_bleu_baseline,
+                    questions=questions_batch,
+                    knowledge_texts=knowledge_batch,
                 )
-                bleu_scores_epoch.append(avg_bleu)
-                
-                # Update running baseline (EMA with alpha=0.1)
-                running_bleu_baseline = 0.9 * running_bleu_baseline + 0.1 * avg_bleu
-                
-                # Handle both differentiable and non-differentiable tensors
-                if bleu_penalty.requires_grad:
+                if bleu_penalty is not None:   # None when all samples skipped
+                    bleu_computed = True
+                    bleu_scores_epoch.append(avg_bleu)
+                    running_bleu_baseline = 0.9 * running_bleu_baseline + 0.1 * avg_bleu
                     total_bleu_penalty += bleu_penalty.detach().item()
-                else:
-                    total_bleu_penalty += bleu_penalty.item()
-                # Log BLEU computation
-                tqdm.write(f"  [Step {step}] BLEU: {avg_bleu:.4f}, baseline: {running_bleu_baseline:.4f}")
-        
-        # Combine losses: 
-        # - Without BLEU penalty: just CE loss
-        # - With BLEU penalty: use the weighted CE loss from BLEU function (replaces normal CE)
-        if args.use_bleu_penalty and bleu_penalty.requires_grad:
-            loss = bleu_penalty  # This is already the weighted CE loss
+                    tqdm.write(f"  [Step {step}] BLEU: {avg_bleu:.4f}, baseline: {running_bleu_baseline:.4f}")
+
+        # Loss selection:
+        #   BLEU computed → use BLEU-weighted CE scaled by bleu_penalty_weight
+        #   otherwise     → use standard CE (Bug 3 fix: apply weight; Bug 2 fix: no req_grad)
+        if bleu_computed:
+            loss = args.bleu_penalty_weight * bleu_penalty  # Bug 3 fix: weight now applied
         else:
             loss = ce_loss
         
