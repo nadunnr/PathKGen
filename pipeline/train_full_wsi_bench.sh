@@ -11,12 +11,11 @@ KNOWLEDGE_TRAIN_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report
 KNOWLEDGE_TEST_JSON="/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
 
 UMLS_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"
+DEFAULT_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
+QWEN_15B_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-1.5B-Instruct"
 
 STAGE1_OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench_knowledge"
 STAGE2_OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage2_wsi_bench_knowledge"
-
-# Optional: warm-start Stage 1 from a previous checkpoint (leave empty to train from scratch)
-INIT_FROM_STAGE1="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench/2026-02-14_15-59_vt128_ml512_e20_bs8/best_model.pt"
 
 STAGE1_RESULTS_DIR="/home/nadun/wd/vlm_histo/results/stage1_wsi_bench_knowledge"
 STAGE2_RESULTS_DIR="/home/nadun/wd/vlm_histo/results/stage2_wsi_bench_knowledge"
@@ -30,22 +29,19 @@ echo "================================================="
 STAGE1_ARGS=(
     --train_json "$KNOWLEDGE_TRAIN_JSON"
     --test_json  "$KNOWLEDGE_TEST_JSON"
-    --llm_path   "$UMLS_LLM_PATH"
+    --llm_path   "$QWEN_15B_PATH"
     --dataset_format wsi-bench
-    --init_from "$INIT_FROM_STAGE1"
-    --output_results_dir "$STAGE1_RESULTS_DIR"
-    --epochs 4
-    --batch_size 4
-    --gradient_accumulation_steps 32
+    --epochs 8
+    --batch_size 8
+    --gradient_accumulation_steps 16
     --lr 5e-4
     --early_stopping
-    --patience 3
+    --patience 2
     --weight_decay 0.01
     --feature_key tokens
     --gradient_checkpointing
-    --val_batch_size 4
+    --val_batch_size 8
     --output_dir "$STAGE1_OUTPUT_DIR"
-    --use_knowledge_guidance
 )
 
 python train_stage1.py "${STAGE1_ARGS[@]}"
@@ -73,27 +69,31 @@ echo "================================================="
 python train_stage2.py \
     --train_json "$KNOWLEDGE_TRAIN_JSON" \
     --test_json  "$KNOWLEDGE_TEST_JSON" \
-    --llm_path   "$UMLS_LLM_PATH" \
+    --llm_path   "$QWEN_15B_PATH" \
     --dataset_format wsi-bench \
     --stage1_checkpoint "$STAGE1_CHECKPOINT" \
     --output_results_dir "$STAGE2_RESULTS_DIR" \
     --compute_metrics_during_training \
-    --epochs 2 \
-    --batch_size 4 \
-    --gradient_accumulation_steps 32 \
+    --label_smoothing 0.1 \
+    --warmup_ratio 0.1 \
+    --eval_num_beams 4 \
+    --eval_length_penalty 1.0 \
+    --no_repeat_ngram_size 3 \
+    --epochs 1 \
+    --batch_size 8 \
+    --gradient_accumulation_steps 16 \
     --num_workers 8 \
     --lr 1e-4 \
     --projection_lr 1e-5 \
-    --weight_decay 0.0 \
+    --weight_decay 0.01 \
     --early_stopping \
     --patience 1 \
-    --lora_rank 128 \
-    --lora_alpha 256 \
+    --lora_rank 92 \
+    --lora_alpha 196 \
     --feature_key tokens \
     --gradient_checkpointing \
-    --val_batch_size 4 \
-    --output_dir "$STAGE2_OUTPUT_DIR" \
-    --use_knowledge_guidance
+    --val_batch_size 8 \
+    --output_dir "$STAGE2_OUTPUT_DIR"
 
 echo ""
 echo "================================================="

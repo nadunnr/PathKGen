@@ -57,3 +57,5 @@ concept-head/labelling/morpho/.fuse_hidden000eb7d600000e50
 kg/graph_retrieval/lib/
 kg/graph_retrieval/graph.html
 kg/graph_retrieval/pathology_focus_graph.html
+*.html
+*.svg

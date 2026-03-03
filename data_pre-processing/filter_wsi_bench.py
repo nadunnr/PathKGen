@@ -191,13 +191,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Preset paths (Defaults)
-    input_train_file = "/home/sandun/nadun/data/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
-    input_test_file = "/home/sandun/nadun/data/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
+    input_train_file = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_full/WSI-Bench-train.json"
+    input_test_file = "/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_full/WSI-Bench-test.json"
     
-    output_dir = args.output_dir if args.output_dir else "/home/sandun/nadun/data/dataset/"
+    output_dir = args.output_dir if args.output_dir else "/home/nadun/wd/datasets/wsi_bench/dataset/"
 
-    default_train_feature_dir = "/home/sandun/nadun/data/slide_features/train"
-    default_test_feature_dir = "/home/sandun/nadun/data/slide_features/test"
+    default_train_feature_dir = "/home/nadun/wd/datasets/wsi_bench/slide_features/train"
+    default_test_feature_dir = "/home/nadun/wd/datasets/wsi_bench/slide_features/test"
     default_tasks = ["Report"]
 
     print("--- Processing Train Set ---")

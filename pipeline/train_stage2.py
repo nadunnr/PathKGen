@@ -26,7 +26,6 @@ from transformers import AutoTokenizer
 
 # Local imports
 from model import VisionLanguageModel
-from losses import compute_rdrop_loss
 from dataset import WSI_Report_Dataset
 from data_collator import VLMDataCollator
 from config import (GENERATION_PROMPT, TRAINING_PROMPT_TEMPLATE,
@@ -36,7 +35,6 @@ from config import (GENERATION_PROMPT, TRAINING_PROMPT_TEMPLATE,
                     DEFAULT_MAX_LENGTH, DEFAULT_MAX_NEW_TOKENS,
                     extract_report_from_labels)
 from metrics import compute_bleu_penalty
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Stage 2 Training: Projection + QLoRA")
@@ -153,10 +151,6 @@ def parse_args():
     # NLU Score Improvement Arguments
     parser.add_argument("--label_smoothing", type=float, default=0.0,
                        help="Label smoothing factor (0.0 = no smoothing, 0.1 = recommended)")
-    parser.add_argument("--use_rdrop", action="store_true",
-                       help="Enable R-Drop consistency regularization (improves generalization)")
-    parser.add_argument("--rdrop_alpha", type=float, default=0.5,
-                       help="Weight for R-Drop KL divergence term")
     parser.add_argument("--warmup_ratio", type=float, default=0.0,
                        help="Ratio of total steps for linear warmup (e.g., 0.1 = 10%% warmup)")
     parser.add_argument("--warmup_steps", type=int, default=0,
@@ -315,51 +309,17 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device, to
             knowledge_input_ids = knowledge_input_ids.to(device)
             knowledge_attention_mask = knowledge_attention_mask.to(device)
         
-        # Forward pass (with optional R-Drop consistency regularization)
-        if args.use_rdrop:
-            # R-Drop: Pass input through model twice with different dropout masks
-            outputs1 = model(
-                visual_features=visual_features,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                labels=None,  # Don't compute loss in model (we compute R-Drop loss)
-                knowledge_input_ids=knowledge_input_ids,
-                knowledge_attention_mask=knowledge_attention_mask
-            )
-            outputs2 = model(
-                visual_features=visual_features,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                labels=None,
-                knowledge_input_ids=knowledge_input_ids,
-                knowledge_attention_mask=knowledge_attention_mask
-            )
-            
-            # Compute R-Drop loss (CE + KL divergence)
-            # Shift logits and labels for causal LM
-            shift_logits1 = outputs1['logits'][..., :-1, :].contiguous()
-            shift_logits2 = outputs2['logits'][..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            
-            ce_loss = compute_rdrop_loss(
-                shift_logits1, shift_logits2, shift_labels,
-                ignore_index=-100,
-                alpha=args.rdrop_alpha
-            )
-            
-            del outputs1, outputs2
-        else:
-            # Standard forward pass
-            outputs = model(
-                visual_features=visual_features,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                labels=labels,
-                knowledge_input_ids=knowledge_input_ids,
-                knowledge_attention_mask=knowledge_attention_mask
-            )
-            ce_loss = outputs['loss']
-            del outputs
+        # Standard forward pass
+        outputs = model(
+            visual_features=visual_features,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,
+            knowledge_input_ids=knowledge_input_ids,
+            knowledge_attention_mask=knowledge_attention_mask
+        )
+        ce_loss = outputs['loss']
+        del outputs
         
         # Compute BLEU-weighted CE penalty if enabled (hard-example mining).
         # Only evaluated every gradient_accumulation_steps to amortise generate() cost.

@@ -9,7 +9,7 @@ import warnings
 from config import (DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS,
                     DEFAULT_LLM_HIDDEN_DIM, DEFAULT_LLM_PATH,
                     DEFAULT_SLIDECHAT_CHECKPOINT, IMAGE_START_TOKEN, IMAGE_END_TOKEN)
-from losses import label_smoothing_loss, compute_rdrop_loss
+from losses import label_smoothing_loss
 
 
 
@@ -110,7 +110,7 @@ class VisionLanguageModel(nn.Module):
         self.image_end_token_id = self.tokenizer.convert_tokens_to_ids(IMAGE_END_TOKEN)
             
         # 2. Initialize projection layer
-        llm_hidden_dim = 3584  # Qwen 2.5 7B
+        llm_hidden_dim = llm_hidden_dim  # Qwen 2.5 7B
         self.projection = ProjectionLayer(
             visual_dim=visual_dim,
             llm_hidden_dim=llm_hidden_dim
@@ -478,7 +478,12 @@ class VisionLanguageModel(nn.Module):
         from config import GENERATION_PROMPT_NO_KNOWLEDGE, GENERATION_PROMPT_WITH_KNOWLEDGE
         
         self.eval()
-        
+
+        # Suppress use_cache + gradient_checkpointing incompatibility warning.
+        # gradient_checkpointing is only active during training; during .eval()
+        # generation we can safely re-enable the KV cache.
+        llm_config_use_cache = getattr(self.llm.config, 'use_cache', True)
+        self.llm.config.use_cache = True
         # Ensure batch dimension
         if visual_features.dim() == 2:
             visual_features = visual_features.unsqueeze(0)
@@ -551,12 +556,16 @@ class VisionLanguageModel(nn.Module):
                     'diversity_penalty': diversity_penalty,
                 })
         else:
-            # Sampling mode
+            # Greedy or sampling mode
+            do_sample = temperature > 0
             gen_kwargs.update({
-                'do_sample': temperature > 0,
-                'temperature': temperature if temperature > 0 else 1.0,
-                'top_p': top_p,
+                'do_sample': do_sample,
+                'temperature': temperature if do_sample else 1.0,
             })
+            # Only pass top_p when actually sampling — these flags are invalid
+            # for greedy decoding and produce a HuggingFace warning.
+            if do_sample:
+                gen_kwargs['top_p'] = top_p
         
         # Generate
         outputs = self.llm.generate(**gen_kwargs)
@@ -575,6 +584,9 @@ class VisionLanguageModel(nn.Module):
         elif "<|im_end|>" in generated_text:
             # Strip any trailing end marker
             generated_text = generated_text.split("<|im_end|>")[0]
+
+        # Restore use_cache to its pre-generation state so training is unaffected.
+        self.llm.config.use_cache = llm_config_use_cache
 
         return generated_text.strip()
     
