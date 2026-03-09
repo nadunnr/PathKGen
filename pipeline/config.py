@@ -72,15 +72,15 @@ Use to help, but verify visually.
 # ============================================================================
 
 # WSI-Bench dataset paths (pre-split into train/test)
-WSI_BENCH_TRAIN = "/home/nadun/wd/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
-WSI_BENCH_TEST = "/home/nadun/wd/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
+WSI_BENCH_TRAIN = "/path/to/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
+WSI_BENCH_TEST = "/path/to/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
 
 # WSI-Bench dataset paths WITH KNOWLEDGE
-WSI_BENCH_TRAIN_KNOWLEDGE = "/home/nadun/wd/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
-WSI_BENCH_TEST_KNOWLEDGE = "/home/nadun/wd/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+WSI_BENCH_TRAIN_KNOWLEDGE = "/path/to/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
+WSI_BENCH_TEST_KNOWLEDGE = "/path/to/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
 
 # HistGen dataset path (contains splits internally)
-HISTGEN_DATASET = "/home/sandun/nadun/data/dataset/histgen_dataset.json"  # Example path
+HISTGEN_DATASET = "/path/to/data/dataset/histgen_dataset.json"  # Example path
 
 # ============================================================================
 # INFERENCE/GENERATION PROMPTS
@@ -166,7 +166,7 @@ def extract_report_from_labels(tokenizer, label_ids):
 # Visual embedding settings
 DEFAULT_NUM_VISUAL_TOKENS = 128  # Default number of visual tokens
 DEFAULT_VISUAL_DIM = 768  # TITAN encoder feature dimension per token
-DEFAULT_LLM_HIDDEN_DIM = 1536  # Qwen 2.5 7B hidden dimension
+DEFAULT_LLM_HIDDEN_DIM = 3584  # Qwen 2.5 7B hidden dimension
 
 # NOTE: Number of visual tokens is now DYNAMIC based on encoder output
 # Typical values: 128 (TITAN), 256, 576 (Gigapath)
@@ -195,7 +195,7 @@ DEFAULT_USE_KNOWLEDGE_GUIDANCE = False
 # Default paths (can be overridden by command-line arguments)
 DEFAULT_LLM_PATH = "/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"
 DEFAULT_SLIDECHAT_CHECKPOINT = "/home/nadun/wd/vlm_histo/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt"
-DEFAULT_DATA_JSON = "/home/nadun/wd/dataset/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
+DEFAULT_DATA_JSON = "/path/to/dataset/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
 DEFAULT_STAGE1_OUTPUT = "/home/nadun/wd/vlm_histo/checkpoints/stage1"
 DEFAULT_STAGE2_OUTPUT = "/home/nadun/wd/vlm_histo/checkpoints/stage2"
 
@@ -206,8 +206,8 @@ class Stage1Config:
     """Configuration for Stage 1 contrastive alignment training."""
     
     # ---- Data ----
-    slide_features_dir: str = "/home/sandun/nadun/data/slide_features"  # Has train/ and test/ subdirs
-    text_embeddings_dir: str = "/home/sandun/nadun/data/text_embeddings"  # Has train/ and test/ subdirs
+    slide_features_dir: str = "/path/to/data/slide_features"  # Has train/ and test/ subdirs
+    text_embeddings_dir: str = "/path/to/data/text_embeddings"  # Has train/ and test/ subdirs
     
     
     # ---- TITAN Model ----

@@ -81,7 +81,7 @@ def compute_single_file(input_json, output_json, model_type, lang, device):
     }
 
 def main():
-    results_root = "/home/nadun/wd/datasets/wsi_bench/results"
+    results_root = "/home/nadun/wd/vlm_histo/data/wsi_bench/results"
     target_filename = "stage2_val_epoch1.json"
     output_filename = "stage2_val_bertscore_clinicalbert.json"
     model_type = "distilbert-base-uncased"

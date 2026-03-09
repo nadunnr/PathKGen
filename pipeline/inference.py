@@ -1,302 +1,444 @@
 """
-Inference script for generating pathology reports from WSI slides.
+Inference script for generating pathology reports from WSI slides and computing NLU metrics.
+
+Supports Stage 1 (projection-only) and Stage 2 (projection + QLoRA) checkpoints.
 
 Usage:
-    # Single slide
-    python pipeline/inference.py \
-        --checkpoint /path/to/checkpoint.pt \
-        --feature_path /path/to/slide.h5 \
-        --output_path report.txt
-
-    # Batch inference on test set
-    python pipeline/inference.py \
-        --checkpoint /path/to/checkpoint.pt \
-        --data_json /path/to/dataset.json \
-        --split test \
+    # Stage 2 checkpoint (projection + LoRA)
+    python pipeline/inference.py \\
+        --stage2_checkpoint /path/to/stage2/best_model.pt \\
         --output_dir /path/to/outputs
+
+    # Stage 1 checkpoint (projection only)
+    python pipeline/inference.py \\
+        --stage1_checkpoint /path/to/stage1/best_model.pt \\
+        --output_dir /path/to/outputs
+
+    # Custom dataset and generation settings
+    python pipeline/inference.py \\
+        --stage2_checkpoint /path/to/stage2/best_model.pt \\
+        --data_json /path/to/test.json \\
+        --output_dir /path/to/outputs \\
+        --num_beams 4 \\
+        --use_knowledge_guidance
 """
 
 import os
-import argparse
+import gc
 import json
-import h5py
+import argparse
+from datetime import datetime
+from pathlib import Path
+
 import torch
 from tqdm import tqdm
-from pathlib import Path
+from torch.utils.data import DataLoader
+from transformers import AutoTokenizer
 
 # Local imports
 from model import VisionLanguageModel
 from dataset import WSI_Report_Dataset
-from config import (GENERATION_PROMPT_NO_KNOWLEDGE, GENERATION_PROMPT_WITH_KNOWLEDGE,
-                    DEFAULT_LLM_PATH, DEFAULT_SLIDECHAT_CHECKPOINT, DEFAULT_VISUAL_DIM,
-                    DEFAULT_NUM_VISUAL_TOKENS, INFERENCE_MAX_NEW_TOKENS,
-                    DEFAULT_TEMPERATURE, DEFAULT_TOP_P, 
-                    DEFAULT_REPETITION_PENALTY)
+from data_collator import VLMDataCollator
+from metrics import compute_metrics
+from config import (
+    IMAGE_START_TOKEN, IMAGE_END_TOKEN,
+    DEFAULT_LLM_PATH,
+    DEFAULT_VISUAL_DIM,
+    DEFAULT_NUM_VISUAL_TOKENS,
+    DEFAULT_MAX_LENGTH,
+    DEFAULT_MAX_NEW_TOKENS,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_TOP_P,
+    DEFAULT_REPETITION_PENALTY,
+    extract_report_from_labels,
+)
 
+# Default test dataset path
+DEFAULT_TEST_JSON = (
+    "/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/"
+    "wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+)
+
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="VLM Inference for Report Generation")
-    
-    # Model arguments
-    parser.add_argument("--checkpoint", type=str, required=True,
-                       help="Path to model checkpoint")
-    parser.add_argument("--llm_path", type=str,
-                       default=DEFAULT_LLM_PATH,
-                       help="Path to base LLM")
-    parser.add_argument("--slidechat_checkpoint", type=str,
-                       default=DEFAULT_SLIDECHAT_CHECKPOINT,
-                       help="Path to SlideChat weights")
-    parser.add_argument("--visual_dim", type=int, default=DEFAULT_VISUAL_DIM,
-                       help="Dimension of slide features")
-    parser.add_argument("--num_visual_tokens", type=int, default=DEFAULT_NUM_VISUAL_TOKENS,
-                       help="Number of visual tokens")
-    parser.add_argument("--use_qlora", action="store_true",
-                       help="Whether checkpoint uses QLoRA (Stage 2)")
-    parser.add_argument("--skip_slidechat_init", action="store_true",
-                       help="Skip loading SlideChat weights (use this for inference with trained checkpoints)")
-    
-    # Dataset arguments
-    parser.add_argument("--feature_path", type=str, default=None,
-                       help="Path to single H5 feature file")
-    parser.add_argument("--feature_key", type=str, default="tokens",
-                       help="Key in H5 file for features")
-    parser.add_argument("--data_json", type=str, default=None,
-                       help="Path to dataset JSON for batch inference")
-    parser.add_argument("--dataset_format", type=str, default="wsi-bench",
-                       choices=["histgen", "wsi-bench"],
-                       help="Dataset format")
-    parser.add_argument("--split", type=str, default="test",
-                       help="Dataset split to use (histgen only)")
-    parser.add_argument("--use_knowledge_guidance", action="store_true",
-                       help="Enable knowledge graph guidance for report generation")
-    
-    # Generation arguments
-    parser.add_argument("--max_new_tokens", type=int, default=INFERENCE_MAX_NEW_TOKENS,
-                       help="Maximum tokens to generate")
-    parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE,
-                       help="Sampling temperature")
-    parser.add_argument("--top_p", type=float, default=DEFAULT_TOP_P,
-                       help="Nucleus sampling parameter")
-    parser.add_argument("--repetition_penalty", type=float, default=DEFAULT_REPETITION_PENALTY,
-                       help="Repetition penalty")
-    
-    # Output arguments
-    parser.add_argument("--output_path", type=str, default=None,
-                       help="Output path for single report")
-    parser.add_argument("--output_dir", type=str, default=None,
-                       help="Output directory for batch reports")
-    parser.add_argument("--save_json", action="store_true",
-                       help="Save results as JSON (batch mode)")
+    parser = argparse.ArgumentParser(
+        description="VLM Inference: generate reports and compute NLU metrics"
+    )
 
-    # Single-slide options
-    parser.add_argument("--question", type=str, default=None,
-                       help="Question for single-slide inference (WSI-Bench format)")
-    parser.add_argument("--knowledge_text", type=str, default=None,
-                       help="Knowledge text for single-slide inference (if --use_knowledge_guidance)")
+    # ── Checkpoint (exactly one required) ───────────────────────────────────
+    ckpt_group = parser.add_mutually_exclusive_group(required=True)
+    ckpt_group.add_argument(
+        "--stage1_checkpoint", type=str, default=None,
+        help="Path to Stage 1 best_model.pt (projection weights only, no LoRA)."
+    )
+    ckpt_group.add_argument(
+        "--stage2_checkpoint", type=str, default=None,
+        help="Path to Stage 2 best_model.pt (projection + QLoRA weights)."
+    )
 
-    # Misc
-    parser.add_argument("--batch_size", type=int, default=1,
-                       help="Batch size for inference (use 1 for variable generation length)")
-    
+    # ── Model ────────────────────────────────────────────────────────────────
+    parser.add_argument(
+        "--llm_path", type=str, default=DEFAULT_LLM_PATH,
+        help="Path to the base LLM (same one used during training)."
+    )
+    parser.add_argument(
+        "--visual_dim", type=int, default=DEFAULT_VISUAL_DIM,
+        help="Visual feature dimension (default: 768 for TITAN)."
+    )
+    parser.add_argument(
+        "--num_visual_tokens", type=int, default=DEFAULT_NUM_VISUAL_TOKENS,
+        help="Number of visual tokens fed to the LLM."
+    )
+
+    # ── Dataset ──────────────────────────────────────────────────────────────
+    parser.add_argument(
+        "--data_json", type=str, default=DEFAULT_TEST_JSON,
+        help="Path to the test dataset JSON file."
+    )
+    parser.add_argument(
+        "--dataset_format", type=str, default="wsi-bench",
+        choices=["histgen", "wsi-bench"],
+        help="Dataset format."
+    )
+    parser.add_argument(
+        "--split", type=str, default=None,
+        help="Dataset split to use (HistGen format only, e.g. 'test')."
+    )
+    parser.add_argument(
+        "--feature_key", type=str, default="tokens",
+        help="Key in H5 feature files for slide embeddings."
+    )
+    parser.add_argument(
+        "--use_knowledge_guidance", action="store_true",
+        help="Pass knowledge text to the model during generation."
+    )
+    parser.add_argument(
+        "--max_length", type=int, default=DEFAULT_MAX_LENGTH,
+        help="Maximum tokenised sequence length for the data collator."
+    )
+    parser.add_argument(
+        "--val_batch_size", type=int, default=4,
+        help="Batch size for the inference DataLoader."
+    )
+    parser.add_argument(
+        "--num_workers", type=int, default=4,
+        help="DataLoader worker processes."
+    )
+
+    # ── Generation ───────────────────────────────────────────────────────────
+    parser.add_argument(
+        "--max_new_tokens", type=int, default=DEFAULT_MAX_NEW_TOKENS,
+        help="Maximum tokens to generate per sample."
+    )
+    parser.add_argument(
+        "--num_beams", type=int, default=1,
+        help="Number of beams for beam search (1 = greedy)."
+    )
+    parser.add_argument(
+        "--length_penalty", type=float, default=1.0,
+        help="Length penalty for beam search (>1 favours longer outputs)."
+    )
+    parser.add_argument(
+        "--no_repeat_ngram_size", type=int, default=3,
+        help="Block repeated n-grams of this size during generation."
+    )
+    parser.add_argument(
+        "--temperature", type=float, default=DEFAULT_TEMPERATURE,
+        help="Sampling temperature (ignored when num_beams > 1)."
+    )
+    parser.add_argument(
+        "--top_p", type=float, default=DEFAULT_TOP_P,
+        help="Nucleus sampling p (ignored when num_beams > 1)."
+    )
+    parser.add_argument(
+        "--repetition_penalty", type=float, default=DEFAULT_REPETITION_PENALTY,
+        help="Repetition penalty."
+    )
+
+    # ── Output ───────────────────────────────────────────────────────────────
+    parser.add_argument(
+        "--output_dir", type=str, required=True,
+        help=(
+            "Directory to save inference outputs. "
+            "Creates: predictions.json, metrics.json"
+        )
+    )
+
     return parser.parse_args()
 
 
-def load_slide_features(feature_path: str, feature_key: str = "features") -> torch.Tensor:
-    """Load slide features from H5 file."""
-    with h5py.File(feature_path, 'r') as h5_file:
-        features = torch.tensor(h5_file[feature_key][:], dtype=torch.float32)
-    return features
+# ---------------------------------------------------------------------------
+# Model loading
+# ---------------------------------------------------------------------------
 
+def load_model(args, device):
+    """
+    Load the VisionLanguageModel and the requested checkpoint.
 
-def single_inference(args, model, device):
-    """Run inference on a single slide."""
-    print(f"Loading features from: {args.feature_path}")
-    features = load_slide_features(args.feature_path, args.feature_key)
+    Stage 1 checkpoint  → use_qlora=False, load 'projection_state_dict' only.
+    Stage 2 checkpoint  → use_qlora=True,  load 'projection_state_dict' + 'lora_state_dict'.
 
-    # Build question and knowledge for generation
-    question = getattr(args, 'question', None)
-    knowledge_text = args.knowledge_text if args.use_knowledge_guidance else None
+    Model is initialised on CPU first, then moved to *device* after weight loading
+    (mirrors evaluate_best_model in train_stage2.py to avoid GPU OOM during load).
+    """
+    is_stage2 = args.stage2_checkpoint is not None
+    checkpoint_path = args.stage2_checkpoint if is_stage2 else args.stage1_checkpoint
+    stage_label = "Stage 2 (QLoRA)" if is_stage2 else "Stage 1 (projection-only)"
 
+    print(f"\n{'='*60}")
+    print(f"Loading model for inference  [{stage_label}]")
+    print(f"  Checkpoint : {checkpoint_path}")
+    print(f"  LLM        : {args.llm_path}")
+    print(f"{'='*60}")
 
-    print("Generating report...")
-    report = model.generate(
-        visual_features=features.to(device),
-        prompt=None,
-        question=question,
-        knowledge_text=knowledge_text,
-        max_new_tokens=args.max_new_tokens,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        repetition_penalty=args.repetition_penalty
+    # Initialise model entirely on CPU first to keep GPU headroom for weights
+    model = VisionLanguageModel(
+        llm_path=args.llm_path,
+        slidechat_checkpoint=None,       # Not needed — weights are in checkpoint
+        visual_dim=args.visual_dim,
+        num_visual_tokens=args.num_visual_tokens,
+        use_qlora=is_stage2,
+        freeze_llm=True,                 # Inference only
+        gradient_checkpointing=False,
+        device="cpu",
     )
 
-    # Print to console
-    print("\n" + "="*60)
-    print("Generated Report:")
-    print("="*60)
-    print(report)
-    print("="*60)
+    # Load checkpoint to CPU, then selectively restore weights
+    print(f"\nLoading checkpoint from: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
 
-    # Save to file if specified
-    if args.output_path:
-        output_path = Path(args.output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, 'w') as f:
-            f.write(report)
-        print(f"\n✓ Report saved to: {args.output_path}")
+    # Projection weights (always present)
+    model.projection.load_state_dict(checkpoint["projection_state_dict"])
+    print("  ✓ Projection weights loaded")
+
+    # LoRA weights (Stage 2 only)
+    if is_stage2:
+        if "lora_state_dict" in checkpoint:
+            model.llm.load_state_dict(checkpoint["lora_state_dict"], strict=False)
+            print("  ✓ LoRA weights loaded")
+        else:
+            print("  ! Warning: 'lora_state_dict' not found in Stage 2 checkpoint")
+
+    # Log checkpoint metadata if available
+    if "epoch" in checkpoint:
+        print(f"  Checkpoint epoch : {checkpoint['epoch'] + 1}")
+    if "val_loss" in checkpoint and checkpoint["val_loss"] is not None:
+        print(f"  Checkpoint val loss : {checkpoint['val_loss']:.4f}")
+
+    # Free checkpoint memory before moving model to GPU
+    del checkpoint
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    # Move model to target device
+    print(f"\nMoving model to {device} ...")
+    model = model.to(device)
+    model.eval()
+
+    print("✓ Model ready.\n")
+    return model
 
 
+# ---------------------------------------------------------------------------
+# Inference loop
+# ---------------------------------------------------------------------------
+
+@torch.no_grad()
+def run_inference(model, dataloader, args, device, tokenizer):
+    """
+    Iterate over the dataset, generate reports, collect predictions and references.
+
+    Mirrors the compute_metrics=True branch of validate() in train_stage2.py.
+    Returns lists of (ids, predictions, references).
+    """
+    all_ids         = []
+    all_predictions = []
+    all_references  = []
+
+    pbar = tqdm(dataloader, desc="Generating reports")
+
+    for batch in pbar:
+        visual_features = batch["visual_features"]   # [B, N, D]
+        labels          = batch["labels"]             # [B, seq_len]
+        batch_size      = visual_features.shape[0]
+
+        for i in range(batch_size):
+            single_visual = visual_features[i:i+1].to(device)
+
+            # Per-sample question / knowledge text
+            question_text  = batch["questions"][i]          if "questions"      in batch else None
+            knowledge_text = batch["knowledge_texts"][i]    if (
+                "knowledge_texts" in batch and args.use_knowledge_guidance
+            ) else None
+
+            # Generate — settings exactly match validate() in train_stage2.py:
+            #   temperature=0.0  (greedy / beam; never sample during eval)
+            #   top_p=1.0        (no nucleus filtering)
+            #   repetition_penalty not passed (matches training eval default)
+            pred_text = model.generate(
+                visual_features=single_visual,
+                prompt=None,            # auto-selects prompt from config
+                question=question_text,
+                knowledge_text=knowledge_text,
+                max_new_tokens=args.max_new_tokens,
+                temperature=0.0,        # always greedy/beam — matches training eval
+                top_p=1.0,             # no nucleus filtering — matches training eval
+                num_beams=args.num_beams,
+                length_penalty=args.length_penalty,
+                no_repeat_ngram_size=args.no_repeat_ngram_size,
+            )
+            all_predictions.append(pred_text)
+
+            # Ground-truth reference from labels
+            label_ids = labels[i][labels[i] != -100]
+            ref_text  = extract_report_from_labels(tokenizer, label_ids)
+            all_references.append(ref_text)
+
+            # Sample ID
+            sample_id = batch["ids"][i] if "ids" in batch else str(len(all_ids))
+            all_ids.append(sample_id)
+
+            # Free per-sample GPU allocation
+            del single_visual
+            torch.cuda.empty_cache()
+
+        pbar.set_postfix({"generated": len(all_ids)})
+
+    return all_ids, all_predictions, all_references
 
 
-def batch_inference(args, model, device):
-    """Run inference on dataset split."""
-    print(f"Loading dataset from: {args.data_json}")
-    
-    split = None if args.dataset_format == 'wsi-bench' else args.split
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    args   = parse_args()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # ── Output directory ────────────────────────────────────────────────────
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Output directory: {output_dir}")
+
+    # ── Tokenizer ───────────────────────────────────────────────────────────
+    print("\nLoading tokenizer ...")
+    tokenizer = AutoTokenizer.from_pretrained(args.llm_path, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # Add image marker special tokens (must match model.py)
+    special_tokens_dict = {
+        "additional_special_tokens": [IMAGE_START_TOKEN, IMAGE_END_TOKEN]
+    }
+    tokenizer.add_special_tokens(special_tokens_dict)
+    print(f"  ✓ Tokenizer loaded, special tokens added: {IMAGE_START_TOKEN}, {IMAGE_END_TOKEN}")
+
+    # ── Dataset ─────────────────────────────────────────────────────────────
+    print(f"\nLoading dataset from: {args.data_json}")
+    split = args.split if args.dataset_format == "histgen" else None
+
     dataset = WSI_Report_Dataset(
         json_path=args.data_json,
         dataset_format=args.dataset_format,
         split=split,
         feature_key=args.feature_key,
-        use_knowledge_guidance=args.use_knowledge_guidance
+        use_knowledge_guidance=args.use_knowledge_guidance,
     )
-    
-    print(f"Processing {len(dataset)} slides...")
-    
-    results = []
+    print(f"  ✓ {len(dataset)} samples loaded")
 
-    if args.output_dir:
-        os.makedirs(args.output_dir, exist_ok=True)
-    
-    for i in tqdm(range(len(dataset)), desc="Generating reports"):
-        sample = dataset[i]
-        slide_id = sample['id']
-        features = sample['slide_embedding']
-        ground_truth = sample.get('answer', sample.get('report', ''))
-        question = sample.get('question', None)
-        knowledge_text = sample.get('knowledge_text', None) if args.use_knowledge_guidance else None
-        
-        # Generate report
-        generated_report = model.generate(
-            visual_features=features.to(device),
-            prompt=None,
-            question=question,
-            knowledge_text=knowledge_text,
-            max_new_tokens=args.max_new_tokens,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            repetition_penalty=args.repetition_penalty
+    collator = VLMDataCollator(
+        tokenizer=tokenizer,
+        dataset_format=args.dataset_format,
+        max_length=args.max_length,
+        use_knowledge_guidance=args.use_knowledge_guidance,
+    )
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=args.val_batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        collate_fn=collator,
+        pin_memory=True,
+    )
+
+    # ── Model ────────────────────────────────────────────────────────────────
+    model = load_model(args, device)
+
+    # ── Inference ────────────────────────────────────────────────────────────
+    print("=" * 60)
+    print("Running inference ...")
+    print("=" * 60)
+
+    all_ids, all_predictions, all_references = run_inference(
+        model, dataloader, args, device, tokenizer
+    )
+
+    print(f"\n✓ Generated {len(all_predictions)} reports")
+
+    # ── Save predictions ─────────────────────────────────────────────────────
+    records = [
+        {"id": sid, "prediction": pred, "reference": ref}
+        for sid, pred, ref in zip(all_ids, all_predictions, all_references)
+    ]
+
+    predictions_path = output_dir / "predictions.json"
+    with open(predictions_path, "w") as f:
+        json.dump(records, f, indent=4)
+    print(f"✓ Predictions saved → {predictions_path}")
+
+    # ── Compute NLU metrics ──────────────────────────────────────────────────
+    if len(all_predictions) > 0 and len(all_references) > 0:
+        print("\nComputing NLU metrics ...")
+        metrics = compute_metrics(all_predictions, all_references)
+
+        print("\n" + "=" * 60)
+        print("Evaluation Results")
+        print("=" * 60)
+        print(
+            f"  BLEU-1 : {metrics.get('bleu1', 0):.4f}   "
+            f"BLEU-2 : {metrics.get('bleu2', 0):.4f}   "
+            f"BLEU-3 : {metrics.get('bleu3', 0):.4f}   "
+            f"BLEU-4 : {metrics.get('bleu4', 0):.4f}"
         )
-        
-        result = {
-            'id': slide_id,
-            'organ': sample.get('organ', 'unknown'),
-            'question': question,
-            'generated_report': generated_report,
-            'ground_truth': ground_truth
+        print(
+            f"  METEOR : {metrics.get('meteor', 0):.4f}   "
+            f"ROUGE-L: {metrics.get('rouge_l', 0):.4f}"
+        )
+        print("=" * 60)
+
+        # Save metrics
+        metrics_payload = {
+            "timestamp": datetime.now().isoformat(),
+            "checkpoint": args.stage2_checkpoint or args.stage1_checkpoint,
+            "data_json": args.data_json,
+            "num_samples": len(all_predictions),
+            "generation_config": {
+                "num_beams": args.num_beams,
+                "max_new_tokens": args.max_new_tokens,
+                "length_penalty": args.length_penalty,
+                "no_repeat_ngram_size": args.no_repeat_ngram_size,
+                "temperature": args.temperature,
+                "use_knowledge_guidance": args.use_knowledge_guidance,
+            },
+            "metrics": metrics,
         }
-        results.append(result)
-        
-        # Save individual report
-        if args.output_dir:
-            report_path = Path(args.output_dir) / f"{slide_id}_report.txt"
-            with open(report_path, 'w') as f:
-                f.write(f"Slide ID: {slide_id}\n")
-                f.write(f"Organ: {sample.get('organ', 'unknown')}\n")
-                if question:
-                    f.write(f"Question: {question}\n")
-                f.write("\n" + "="*60 + "\n")
-                f.write("Generated Report:\n")
-                f.write("="*60 + "\n")
-                f.write(generated_report)
-                f.write("\n\n" + "="*60 + "\n")
-                f.write("Ground Truth:\n")
-                f.write("="*60 + "\n")
-                f.write(ground_truth)
-    
-    # Save JSON summary
-    if args.save_json and args.output_dir:
-        json_path = Path(args.output_dir) / "results.json"
-        with open(json_path, 'w') as f:
-            json.dump(results, f, indent=2)
-        print(f"\n✓ Results saved to: {json_path}")
-    
-    print(f"\n✓ Generated {len(results)} reports")
-    if args.output_dir:
-        print(f"✓ Individual reports saved to: {args.output_dir}")
 
-
-def main():
-    args = parse_args()
-    
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-    
-    # Validate input arguments
-    if args.feature_path is None and args.data_json is None:
-        raise ValueError("Must specify either --feature_path or --data_json")
-    
-    if args.feature_path and args.output_path is None:
-        print("Warning: No output path specified for single inference")
-    
-    if args.data_json and args.output_dir is None:
-        print("Warning: No output directory specified for batch inference")
-    
-    # Auto-detect checkpoint type (Stage 1 or Stage 2)
-    print(f"\nChecking checkpoint type: {args.checkpoint}")
-    checkpoint_cpu = torch.load(args.checkpoint, map_location='cpu')
-    has_lora = 'lora_state_dict' in checkpoint_cpu
-    
-    if has_lora and not args.use_qlora:
-        print("Detected Stage 2 checkpoint (QLoRA). Setting use_qlora=True")
-        args.use_qlora = True
-    elif not has_lora and args.use_qlora:
-        print("Warning: use_qlora=True but checkpoint doesn't have LoRA weights")
-        args.use_qlora = False
-    
-    # Clear checkpoint from memory
-    del checkpoint_cpu
-    torch.cuda.empty_cache()
-    
-    # Initialize model
-    print("\n" + "="*60)
-    print("Loading VLM Model for Inference")
-    print("="*60)
-    
-    # For inference with trained checkpoint, skip SlideChat to save memory
-    slidechat_path = None if args.skip_slidechat_init else args.slidechat_checkpoint
-    if args.skip_slidechat_init:
-        print("Skipping SlideChat initialization (will load from checkpoint)")
-    
-    model = VisionLanguageModel(
-        llm_path=args.llm_path,
-        slidechat_checkpoint=slidechat_path,
-        visual_dim=args.visual_dim,
-        num_visual_tokens=args.num_visual_tokens,
-        use_qlora=args.use_qlora,
-        freeze_llm=True,  # Not needed for inference
-        device=device
-    )
-    
-    # Load checkpoint weights
-    print(f"\nLoading checkpoint weights from: {args.checkpoint}")
-    model.load_checkpoint(args.checkpoint, load_optimizer=False)
-    model.eval()
-    
-    # Clear cache
-    torch.cuda.empty_cache()
-    
-    print("\n✓ Model loaded successfully!")
-    
-    # Run inference
-    if args.feature_path:
-        single_inference(args, model, device)
+        metrics_path = output_dir / "metrics.json"
+        with open(metrics_path, "w") as f:
+            json.dump(metrics_payload, f, indent=4)
+        print(f"✓ Metrics saved      → {metrics_path}")
     else:
-        batch_inference(args, model, device)
-    
-    print("\n" + "="*60)
-    print("Inference Complete!")
-    print("="*60)
+        print("No predictions to evaluate.")
+
+    print("\n" + "=" * 60)
+    print("Inference complete!")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

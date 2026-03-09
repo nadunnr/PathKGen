@@ -1,6 +1,0 @@
-name: vlm
-channels:
-  - defaults
-dependencies:
-  - python=3.10
-prefix: /home/nadun/hdd/miniconda3/envs/vlm

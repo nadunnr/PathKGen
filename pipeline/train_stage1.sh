@@ -1,45 +1,38 @@
 #!/bin/bash
-# Memory-optimized training script for Stage 1
+# Stage 1 Training script for WSI-Bench dataset
+# Trains only the projection layer with optimized configuration
 
-epochs=20
-batch_size=2
-gradient_accumulation_steps=8
-max_length=512
-train_split=train,val
-val_split=test
-gradient_checkpointing=True
-lr=1e-4
-output_dir=checkpoints/stage1
-save_every=2
+# Set PyTorch memory allocation
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-parent_dir="wd/vlm_histo/checkpoints/stage2/2026-02-01_13-09_vt64_ml512_e5_bs2 wd/vlm_histo/pipeline"
+echo "Starting Stage 1 Training with WSI-Bench Dataset"
+echo "================================================="
 
-echo "Starting Stage 1 Training with Memory Optimizations"
-echo "===================================================="
-echo ""
-echo "Optimizations enabled:"
-echo "  - Gradient checkpointing: $gradient_checkpointing"
-echo "  - Batch size: $batch_size"
-echo "  - Gradient accumulation: $gradient_accumulation_steps steps (effective batch size = $batch_size * $gradient_accumulation_steps)"
-echo "  - Max length: $max_length"
-echo "  - Train split: $train_split"
-echo "  - Val split: $val_split"
-echo "  - Learning rate: $lr"
-echo "  - Output directory: $output_dir"
-echo "  - Save every: $save_every epochs"
-echo ""
+# WSI-Bench dataset paths
+WSI_BENCH_TRAIN="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
+WSI_BENCH_TEST="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
+
+KNOWLEDGE_TRAIN_JSON="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
+KNOWLEDGE_TEST_JSON="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+
+OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench"
 
 python train_stage1.py \
-    --epochs $epochs \
-    --batch_size $batch_size \
-    --gradient_accumulation_steps $gradient_accumulation_steps\
-    --max_length $max_length \
-    --train_split $train_split \
-    --val_split $val_split \
+    --train_json "$WSI_BENCH_TRAIN" \
+    --test_json "$WSI_BENCH_TEST" \
+    --dataset_format wsi-bench \
+    --epochs 10 \
+    --batch_size 1 \
+    --gradient_accumulation_steps 64 \
+    --lr 5e-4 \
+    --early_stopping \
+    --patience 3 \
+    --weight_decay 0.01 \
+    --feature_key tokens \
     --gradient_checkpointing \
-    --lr $lr \
-    --output_dir "$parent_dir/$output_dir" \
-    --save_every $save_every
+    --max_length 1024 \
+    --val_batch_size 1 \
+    --output_dir "$OUTPUT_DIR" \
 
 echo ""
-echo "Training complete!"
+echo "Stage 1 training complete! Checkpoints saved to: $OUTPUT_DIR"
