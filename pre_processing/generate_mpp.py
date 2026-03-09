@@ -3,14 +3,19 @@ This script creates a csv file for the slide encoder to know the WSI's mpp. If a
 
 import os
 import json
+import sys
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import DATA_DIR, DATASET_DIR
 import openslide
 import pandas as pd
 import tqdm
 
-# wsi_dir = "/path/to/datasets/tcga_report_histgen/breast_wsi_dataset"
-wsi_dir = "/home/nadun/wd/vlm_histo/data/temp_wsis"
+# Configuration
+wsi_dir = os.path.join(DATA_DIR, "temp_wsis")
 output_csv = os.path.join(wsi_dir, "slide_list.csv")
-wsi_json = "/path/to/datasets/tcga_report_histgen/primary_site_splits/breast_dataset.json"
+wsi_json = os.path.join(DATASET_DIR, "tcga_report_histgen", "primary_site_splits", "breast_dataset.json")
 
 results = []
 files_to_delete = []  # Track files without MPP

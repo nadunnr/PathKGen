@@ -2,7 +2,12 @@ from neo4j import GraphDatabase
 import csv
 import sys
 import json
+import os
 from collections import defaultdict
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import DATA_DIR
 
 
 # Increase field size limit bcz of large csv fields
@@ -426,8 +431,8 @@ if __name__ == '__main__':
     NEO4J_USER = "neo4j"
     NEO4J_PASSWORD = "11111111"  # Change this to your Neo4j password
     
-    NODES_CSV = "/path/to/datasets/UMLS_sql/neo4jdb/v8/nodes.csv"
-    RELATIONSHIPS_CSV = "/path/to/datasets/UMLS_sql/neo4jdb/v8/relationships.csv"
+    NODES_CSV = os.path.join(DATA_DIR, "UMLS_sql", "neo4jdb", "v8", "nodes.csv")
+    RELATIONSHIPS_CSV = os.path.join(DATA_DIR, "UMLS_sql", "neo4jdb", "v8", "relationships.csv")
     
 
     loader = Neo4jLoader(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD, database="neo4jv8")  
@@ -437,7 +442,7 @@ if __name__ == '__main__':
 # 
     loader.load_relationships(RELATIONSHIPS_CSV, batch_size=100000)
 
-    loader.update_node_definitions("/path/to/datasets/UMLS_sql/neo4jdb/v8/definitions.csv", batch_size=1000)  
+    loader.update_node_definitions(os.path.join(DATA_DIR, "UMLS_sql", "neo4jdb", "v8", "definitions.csv"), batch_size=1000)
     loader.close()
 
     # query = Neo4jQuery(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)

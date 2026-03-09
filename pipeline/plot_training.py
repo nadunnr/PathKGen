@@ -1,22 +1,25 @@
 """
 Visualize training progress from saved history.
 
-Usage:
+Usage (paths come from paths_config.py — CHECKPOINTS_DIR and RESULTS_DIR):
     python pipeline/plot_training.py \
-        --stage1_history /path/to/stage1/training_history.json \
-        --stage2_history /path/to/stage2/training_history.json \
-        --output_dir /path/to/plots
+        --stage1_history $CHECKPOINTS_DIR/stage1/training_history.json \
+        --stage2_history $CHECKPOINTS_DIR/stage2/training_history.json \
+        --output_dir $RESULTS_DIR/plots
 """
 
 import argparse
 import json
+import os
 import matplotlib.pyplot as plt
 from pathlib import Path
+from config import CHECKPOINTS_DIR
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Plot training history")
-    parser.add_argument("--stage1_history", type=str, default="/home/nadun/wd/vlm_histo/pipeline/checkpoints/stage1/23.01.2026_epoch 50/training_history.json",
+    default_s1 = os.path.join(CHECKPOINTS_DIR, "stage1", "23.01.2026_epoch 50", "training_history.json")
+    parser.add_argument("--stage1_history", type=str, default=default_s1,
                        help="Path to Stage 1 training_history.json")
     parser.add_argument("--stage2_history", type=str, default=None,
                        help="Path to Stage 2 training_history.json")

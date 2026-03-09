@@ -7,6 +7,7 @@ import json
 import os
 import torch
 import glob
+from config import DATA_DIR
 
 # Monkeypatch transformers to bypass the strict torch.load security check (CVE-2025-32434)
 # which blocks loading .bin files on torch < 2.6.
@@ -81,7 +82,7 @@ def compute_single_file(input_json, output_json, model_type, lang, device):
     }
 
 def main():
-    results_root = "/home/nadun/wd/vlm_histo/data/wsi_bench/results"
+    results_root = os.path.join(DATA_DIR, "wsi_bench", "results")
     target_filename = "stage2_val_epoch1.json"
     output_filename = "stage2_val_bertscore_clinicalbert.json"
     model_type = "distilbert-base-uncased"

@@ -1,4 +1,9 @@
 import os
+import sys
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import VLM_ROOT, DATA_DIR, DATASET_DIR
 import csv
 import pandas as pd
 import numpy as np
@@ -23,10 +28,10 @@ from utils import load_labels
 
 # Set-up
 SPLIT = "test"
-LABEL_JSON = f"/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_{SPLIT}.json"
-TRAIN_JSON = f"/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
-EMBEDDING_DIR = f"/home/nadun/wd/vlm_histo/data/wsi_bench/slide_features/{SPLIT}"
-MODEL_PATH = f"/home/nadun/wd/vlm_histo/concept-head/head/output/classifier_with_site_best.pt"
+LABEL_JSON = os.path.join(DATASET_DIR, "wsi_bench_Report_with_features", f"wsi_bench_Report_{SPLIT}.json")
+TRAIN_JSON = os.path.join(DATASET_DIR, "wsi_bench_Report_with_features", "wsi_bench_Report_train.json")
+EMBEDDING_DIR = os.path.join(DATA_DIR, "wsi_bench", "slide_features", SPLIT)
+MODEL_PATH = os.path.join(VLM_ROOT, "auxiliary_classifier", "output", "classifier_best.pt")
 OUTPUT_PREFIX = f"output/classifier_{SPLIT}"
 
 # Hyper-parameters

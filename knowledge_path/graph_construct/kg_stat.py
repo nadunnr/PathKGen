@@ -1,12 +1,17 @@
 import pandas as pd
 import json
 import os
+import sys
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from paths_config import DATA_DIR
 import networkx as nx
 from collections import Counter
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-graph_incidence_list = "/home/nadun/wd/vlm_histo/data/wsi_bench/custom_kg/relations.csv"
-stats_output_path    = "/home/nadun/wd/vlm_histo/data/wsi_bench/kg_data/stats"
+graph_incidence_list = os.path.join(DATA_DIR, "wsi_bench", "custom_kg", "relations.csv")
+stats_output_path    = os.path.join(DATA_DIR, "wsi_bench", "kg_data", "stats")
 os.makedirs(stats_output_path, exist_ok=True)
 
 # ── Load CSV ─────────────────────────────────────────────────────────────────

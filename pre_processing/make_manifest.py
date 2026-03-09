@@ -1,10 +1,15 @@
 import pandas as pd
 import requests
 import os
+import sys
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import DATA_DIR
 
 # --- Configuration ---
-CSV_FILE = "/path/to/missing_wsis/test.csv"
-MANIFEST_FILE = "/path/to/missing_wsis/test_v2.txt"
+CSV_FILE = os.path.join(DATA_DIR, "temp_wsis", "missing_wsis.csv")
+MANIFEST_FILE = os.path.join(DATA_DIR, "temp_wsis", "missing_wsis_manifest.txt")
 GDC_FILES_ENDPOINT = "https://api.gdc.cancer.gov/files"
 CSV_ID_COLUMN = "tcga_id"
 BATCH_SIZE = 100 

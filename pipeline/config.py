@@ -5,7 +5,12 @@ Single source of truth for prompts and other shared settings.
 Change the prompt here once, and it updates everywhere.
 """
 import os
+import sys
 from dataclasses import dataclass
+
+# Import base directories from root-level config
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import VLM_ROOT, DATA_DIR, DATASET_DIR, CHECKPOINTS_DIR, RESULTS_DIR
 
 # ============================================================================
 # PROMPT CONFIGURATION
@@ -72,15 +77,15 @@ Use to help, but verify visually.
 # ============================================================================
 
 # WSI-Bench dataset paths (pre-split into train/test)
-WSI_BENCH_TRAIN = "/path/to/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
-WSI_BENCH_TEST = "/path/to/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
+WSI_BENCH_TRAIN = os.path.join(DATASET_DIR, "wsi_bench_Report_with_features", "wsi_bench_Report_train.json")
+WSI_BENCH_TEST = os.path.join(DATASET_DIR, "wsi_bench_Report_with_features", "wsi_bench_Report_test.json")
 
 # WSI-Bench dataset paths WITH KNOWLEDGE
-WSI_BENCH_TRAIN_KNOWLEDGE = "/path/to/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
-WSI_BENCH_TEST_KNOWLEDGE = "/path/to/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+WSI_BENCH_TRAIN_KNOWLEDGE = os.path.join(DATASET_DIR, "wsi_bench_Report_knowledge", "WSI-Bench-train_Report_knowledge.json")
+WSI_BENCH_TEST_KNOWLEDGE = os.path.join(DATASET_DIR, "wsi_bench_Report_knowledge", "WSI-Bench-test_Report_knowledge.json")
 
 # HistGen dataset path (contains splits internally)
-HISTGEN_DATASET = "/path/to/data/dataset/histgen_dataset.json"  # Example path
+HISTGEN_DATASET = os.path.join(DATASET_DIR, "histgen_dataset.json")
 
 # ============================================================================
 # INFERENCE/GENERATION PROMPTS
@@ -193,11 +198,11 @@ DEFAULT_USE_KNOWLEDGE_GUIDANCE = False
 # ============================================================================
 
 # Default paths (can be overridden by command-line arguments)
-DEFAULT_LLM_PATH = "/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"
-DEFAULT_SLIDECHAT_CHECKPOINT = "/home/nadun/wd/vlm_histo/checkpoints/SlideChat_Weight/stage2_pth/mp_rank_00_model_states.pt"
-DEFAULT_DATA_JSON = "/path/to/dataset/tcga_report_histgen/primary_site_splits/breast_dataset_split_0.7_0.1_0.2.json"
-DEFAULT_STAGE1_OUTPUT = "/home/nadun/wd/vlm_histo/checkpoints/stage1"
-DEFAULT_STAGE2_OUTPUT = "/home/nadun/wd/vlm_histo/checkpoints/stage2"
+DEFAULT_LLM_PATH = os.path.join(CHECKPOINTS_DIR, "Qwen-UMLS-7B-Instruct")
+DEFAULT_SLIDECHAT_CHECKPOINT = os.path.join(CHECKPOINTS_DIR, "SlideChat_Weight", "stage2_pth", "mp_rank_00_model_states.pt")
+DEFAULT_DATA_JSON = os.path.join(DATASET_DIR, "tcga_report_histgen", "primary_site_splits", "breast_dataset_split_0.7_0.1_0.2.json")
+DEFAULT_STAGE1_OUTPUT = os.path.join(CHECKPOINTS_DIR, "stage1")
+DEFAULT_STAGE2_OUTPUT = os.path.join(CHECKPOINTS_DIR, "stage2")
 
 
 
@@ -206,8 +211,8 @@ class Stage1Config:
     """Configuration for Stage 1 contrastive alignment training."""
     
     # ---- Data ----
-    slide_features_dir: str = "/path/to/data/slide_features"  # Has train/ and test/ subdirs
-    text_embeddings_dir: str = "/path/to/data/text_embeddings"  # Has train/ and test/ subdirs
+    slide_features_dir: str = os.path.join(DATA_DIR, "wsi_bench", "slide_features")  # Has train/ and test/ subdirs
+    text_embeddings_dir: str = os.path.join(DATA_DIR, "wsi_bench", "text_embeddings")  # Has train/ and test/ subdirs
     
     
     # ---- TITAN Model ----
@@ -232,7 +237,7 @@ class Stage1Config:
     context_length: int = 128   # TITAN text context length
     
     # ---- Checkpointing ----
-    checkpoint_dir: str = "./checkpoints/stage1"
+    checkpoint_dir: str = os.path.join(CHECKPOINTS_DIR, "stage1")
     save_every_n_epochs: int = 5
     
     # ---- System ----

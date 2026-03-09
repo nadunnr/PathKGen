@@ -1,7 +1,6 @@
 #!/bin/bash
 # Training script for WSI-Bench dataset
-# Optimized configuration based on WSI-LLaVA analysis
-# Enhanced with NLU score improvements
+source "$(dirname "$0")/../paths_config.sh"
 
 # Set PyTorch memory allocation
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -10,19 +9,19 @@ echo "Starting Stage 2 Training with WSI-Bench Dataset (NLU Optimized)"
 echo "=================================================================="
 
 # WSI-Bench dataset paths
-WSI_BENCH_TRAIN="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
-WSI_BENCH_TEST="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
+WSI_BENCH_TRAIN="$DATASET_DIR/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
+WSI_BENCH_TEST="$DATASET_DIR/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
 
-KNOWLEDGE_TRAIN_JSON="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
-KNOWLEDGE_TEST_JSON="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+KNOWLEDGE_TRAIN_JSON="$DATASET_DIR/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
+KNOWLEDGE_TEST_JSON="$DATASET_DIR/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
 
-DEFAULT_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
-UMLS_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"
+DEFAULT_LLM_PATH="$CHECKPOINTS_DIR/Qwen2.5-7B-Instruct"
+UMLS_LLM_PATH="$CHECKPOINTS_DIR/Qwen-UMLS-7B-Instruct"
 
 # Configuration
-OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage2_wsi_bench_knowledge"
-STAGE1_CHECKPOINT="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench_knowledge/2026-02-24_10-55_vt128_ml768_e10_bs4/best_model.pt"
-STAGE2_RESULTS_DIR="/home/nadun/wd/vlm_histo/results/stage2_wsi_bench_knowledge"
+OUTPUT_DIR="$CHECKPOINTS_DIR/stage2_wsi_bench_knowledge"
+STAGE1_CHECKPOINT="$CHECKPOINTS_DIR/stage1_wsi_bench_knowledge/2026-02-24_10-55_vt128_ml768_e10_bs4/best_model.pt"
+STAGE2_RESULTS_DIR="$RESULTS_DIR/stage2_wsi_bench_knowledge"
 
 # Retry logic: repeat if error occurs
 python train_stage2.py \

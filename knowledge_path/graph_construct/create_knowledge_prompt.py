@@ -1,10 +1,16 @@
 import json
+import os
+import sys
 import pandas as pd
 
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from paths_config import DATA_DIR
 
-descriptions_path = '/home/nadun/wd/vlm_histo/data/wsi_bench/kg_data/descriptions.json'
-morphs_path = '/home/nadun/wd/vlm_histo/data/wsi_bench/custom_kg/relations.csv'
-output_path = "/home/nadun/wd/vlm_histo/data/wsi_bench/kg_data/histology_descriptions_with_features.json"
+
+descriptions_path = os.path.join(DATA_DIR, "wsi_bench", "kg_data", "descriptions.json")
+morphs_path = os.path.join(DATA_DIR, "wsi_bench", "custom_kg", "relations.csv")
+output_path = os.path.join(DATA_DIR, "wsi_bench", "kg_data", "histology_descriptions_with_features.json")
 
 with open(descriptions_path) as f:
     descriptions = json.load(f)
@@ -47,21 +53,3 @@ for histology, features in histologies.items():
 with open(output_path, 'w') as f:
     json.dump(data, f, indent=2)
 print(f"Saved histology descriptions with features to {output_path}")
-
-
-
-
-# data = {}
-# for histology_data in descriptions:
-
-#     histology = histology_data['histology']
-#     description = histology_data['description']
-
-#     features = histologies.get(histology, {})
-#     knowledge = f"""<knowledge>\nHistology: {histology}\nDescription: {description}\nMorphological Features: {features}\n</knowledge>"""
-#     data[histology] = knowledge
-
-# #save this as a json file
-# with open(output_path, 'w') as f:
-#     json.dump(data, f, indent=2)
-# print(f"Saved histology descriptions with features to {output_path}")

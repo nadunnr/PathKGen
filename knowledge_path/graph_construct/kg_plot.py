@@ -1,10 +1,14 @@
 """
 kg_plot.py  -  Visualise KG statistics saved by kg_stat.py.
-Outputs PNG files to: /home/nadun/wd/vlm_histo/data/wsi_bench/kg_data/stats/
 """
 
 import json
 import os
+import sys
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from paths_config import DATA_DIR
 import networkx as nx
 import pandas as pd
 import matplotlib
@@ -23,8 +27,8 @@ plt.rcParams.update({
 })
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-STATS_DIR    = "/home/nadun/wd/vlm_histo/data/wsi_bench/kg_data/stats"
-CSV_PATH     = "/home/nadun/wd/vlm_histo/data/wsi_bench/custom_kg/relations.csv"
+STATS_DIR    = os.path.join(DATA_DIR, "wsi_bench", "kg_data", "stats")
+CSV_PATH     = os.path.join(DATA_DIR, "wsi_bench", "custom_kg", "relations.csv")
 
 BASIC_JSON   = os.path.join(STATS_DIR, "basic_stats.json")
 COMP_JSON    = os.path.join(STATS_DIR, "connected_components.json")

@@ -13,7 +13,8 @@ from config import (
     TRAINING_PROMPT_WSI_BENCH,
     TRAINING_PROMPT_WSI_BENCH_KNOWLEDGE,
     IMAGE_START_TOKEN,
-    IMAGE_END_TOKEN
+    IMAGE_END_TOKEN,
+    CHECKPOINTS_DIR
 )
 
 
@@ -195,7 +196,7 @@ if __name__ == "__main__":
     from transformers import AutoTokenizer
     from config import IMAGE_START_TOKEN, IMAGE_END_TOKEN
 
-    LLM_PATH = "/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
+    LLM_PATH = os.path.join(CHECKPOINTS_DIR, "Qwen2.5-7B-Instruct")
     PASS = "\033[92m✓\033[0m"
     FAIL = "\033[91m✗\033[0m"
     errors = []

@@ -6,7 +6,10 @@ import csv
 import os
 import json
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ROOT_DIR = str(Path(__file__).resolve().parents[2])
+sys.path.insert(0, ROOT_DIR)
+from paths_config import DATA_DIR
+sys.path.insert(0, os.path.join(ROOT_DIR, "knowledge_path"))
 from graphs import Neo4jQuery
 
 TOP_N = 150
@@ -25,9 +28,9 @@ if __name__ == "__main__":
 
     neo4j_query = Neo4jQuery(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
 
-    histology_jsons = "/home/nadun/wd/vlm_histo/data/wsi_bench/kg_data/cui_jsons"
-    top_cuis_json = f"/home/nadun/wd/vlm_histo/data/wsi_bench/kg_data/top_cuis/top_{TOP_N}_cuis.json"
-    top_cuis_names_json = f"/home/nadun/wd/vlm_histo/data/wsi_bench/kg_data/top_cuis/top_{TOP_N}_cuis_names.json"
+    histology_jsons = os.path.join(DATA_DIR, "wsi_bench", "kg_data", "cui_jsons")
+    top_cuis_json = os.path.join(DATA_DIR, "wsi_bench", "kg_data", "top_cuis", f"top_{TOP_N}_cuis.json")
+    top_cuis_names_json = os.path.join(DATA_DIR, "wsi_bench", "kg_data", "top_cuis", f"top_{TOP_N}_cuis_names.json")
 
     # Load existing data or create new dict
     if os.path.exists(top_cuis_json):

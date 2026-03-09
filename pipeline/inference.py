@@ -51,12 +51,13 @@ from config import (
     DEFAULT_TOP_P,
     DEFAULT_REPETITION_PENALTY,
     extract_report_from_labels,
+    DATASET_DIR,
 )
 
 # Default test dataset path
-DEFAULT_TEST_JSON = (
-    "/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/"
-    "wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+DEFAULT_TEST_JSON = os.path.join(
+    DATASET_DIR,
+    "wsi_bench_Report_knowledge", "WSI-Bench-test_Report_knowledge.json"
 )
 
 

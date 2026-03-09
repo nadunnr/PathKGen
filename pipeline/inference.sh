@@ -1,13 +1,14 @@
 #!/bin/bash
 # Inference script for WSI-Bench test set
+source "$(dirname "$0")/../paths_config.sh"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-WSI_BENCH_TEST="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
-KNOWLEDGE_TEST_JSON="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
-UMLS_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"
-STAGE2_CHECKPOINT="/home/nadun/wd/vlm_histo/checkpoints/q7b_best/s2/checkpoint_epoch_1.pt"
-OUTPUT_DIR="/home/nadun/wd/vlm_histo/results/inference_wsi_bench"
+WSI_BENCH_TEST="$DATASET_DIR/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
+KNOWLEDGE_TEST_JSON="$DATASET_DIR/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+UMLS_LLM_PATH="$CHECKPOINTS_DIR/Qwen-UMLS-7B-Instruct"
+STAGE2_CHECKPOINT="$CHECKPOINTS_DIR/q7b_best/s2/checkpoint_epoch_1.pt"
+OUTPUT_DIR="$RESULTS_DIR/inference_wsi_bench"
 
 echo "Starting Inference with WSI-Bench Dataset"
 echo "================================================="
@@ -23,8 +24,8 @@ python inference.py \
     --dataset_format    wsi-bench \
     --use_knowledge_guidance \
     --feature_key       tokens \
-    --val_batch_size    4 \
-    --num_workers       4 \
+    --val_batch_size    4  \
+    --num_workers       8 \
     --max_new_tokens    512 \
     --num_beams         4 \
     --length_penalty    1.0 \

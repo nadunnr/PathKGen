@@ -1,5 +1,10 @@
 import json
 import os
+import sys
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import DATA_DIR
 import argparse
 import requests
 import time
@@ -264,7 +269,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_gdc", action="store_true", help="Fetch metadata from GDC API")
     args = parser.parse_args()
 
-    base_dir = "/home/nadun/wd/vlm_histo/data/wsi_bench/dataset_raw"
+    base_dir = os.path.join(DATA_DIR, "wsi_bench", "dataset_raw")
     output_dir = os.path.join(os.path.dirname(base_dir), "dataset/wsi_bench_full")
     os.makedirs(output_dir, exist_ok=True)
     

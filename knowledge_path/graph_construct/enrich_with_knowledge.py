@@ -1,20 +1,25 @@
 import json
 import os
+import sys
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from paths_config import VLM_ROOT, DATA_DIR, DATASET_DIR
 import copy
 import pandas as pd
 from collections import Counter
 
 # ── Input paths ──────────────────────────────────────────────────────────────
-WSI_TRAIN_SET = "/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
-WSI_TEST_SET = "/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
+WSI_TRAIN_SET = os.path.join(DATASET_DIR, "wsi_bench_Report_with_features", "wsi_bench_Report_train.json")
+WSI_TEST_SET = os.path.join(DATASET_DIR, "wsi_bench_Report_with_features", "wsi_bench_Report_test.json")
 
-train_histology_preds = "/home/nadun/wd/vlm_histo/concept-head/head/output/classifier_with_site_train_pred.csv"
-test_histology_preds = "/home/nadun/wd/vlm_histo/concept-head/head/output/classifier_with_site_test_pred.csv"
+train_histology_preds = os.path.join(VLM_ROOT, "auxiliary_classifier", "output", "classifier_train_pred.csv")
+test_histology_preds = os.path.join(VLM_ROOT, "auxiliary_classifier", "output", "classifier_test_pred.csv")
 
-knowledge_path = '/home/nadun/wd/vlm_histo/data/wsi_bench/kg_data/histology_descriptions_with_features.json'
+knowledge_path = os.path.join(DATA_DIR, "wsi_bench", "kg_data", "histology_descriptions_with_features.json")
 
 # ── Output paths ─────────────────────────────────────────────────────────────
-OUT_DIR = "/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_knowledge"
+OUT_DIR = os.path.join(DATASET_DIR, "wsi_bench_Report_knowledge")
 
 updated_knowledge_train_set = os.path.join(OUT_DIR, "WSI-Bench-train_Report_knowledge.json")
 updated_knowledge_test_set  = os.path.join(OUT_DIR, "WSI-Bench-test_Report_knowledge.json")

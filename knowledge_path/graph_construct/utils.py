@@ -1,5 +1,11 @@
 import pandas as pd
 import glob
+import os
+import sys
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from paths_config import DATA_DIR
 
 
 def make_relations_csv(csv_dir: str) -> pd.DataFrame:
@@ -25,6 +31,6 @@ def make_relations_csv(csv_dir: str) -> pd.DataFrame:
     return df_combined
 
 if __name__ == "__main__":
-    csv_dir = "/home/nadun/wd/vlm_histo/data/wsi_bench/custom_kg"
+    csv_dir = os.path.join(DATA_DIR, "wsi_bench", "custom_kg")
     make_relations_csv(csv_dir)
 

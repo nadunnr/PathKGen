@@ -1,4 +1,9 @@
 import os
+import sys
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import DATASET_DIR
 import numpy as np
 import h5py
 import torch
@@ -14,7 +19,7 @@ from dataset import ConceptDatasetwithSite
 from utils import load_labels, save_vocabs, save_distribution
 
 # Set-up
-LABEL_JSON = "/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
+LABEL_JSON = os.path.join(DATASET_DIR, "wsi_bench_Report_with_features", "wsi_bench_Report_train.json")
 os.makedirs("output", exist_ok=True)
 OUTPUT_PREFIX = "output/classifier"
 

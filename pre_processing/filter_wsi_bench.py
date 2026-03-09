@@ -1,5 +1,10 @@
 import json
 import os
+import sys
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import DATA_DIR
 import re
 import argparse
 import random
@@ -191,13 +196,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Preset paths (Defaults)
-    input_train_file = "/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_full/WSI-Bench-train.json"
-    input_test_file = "/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_full/WSI-Bench-test.json"
+    input_train_base = os.path.join(DATA_DIR, "wsi_bench", "dataset", "wsi_bench_full")
+    input_train_file = os.path.join(input_train_base, "WSI-Bench-train.json")
+    input_test_file  = os.path.join(input_train_base, "WSI-Bench-test.json")
     
-    output_dir = args.output_dir if args.output_dir else "/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/"
+    output_dir = args.output_dir if args.output_dir else os.path.join(DATA_DIR, "wsi_bench", "dataset")
 
-    default_train_feature_dir = "/home/nadun/wd/vlm_histo/data/wsi_bench/slide_features/train"
-    default_test_feature_dir = "/home/nadun/wd/vlm_histo/data/wsi_bench/slide_features/test"
+    default_train_feature_dir = os.path.join(DATA_DIR, "wsi_bench", "slide_features", "train")
+    default_test_feature_dir = os.path.join(DATA_DIR, "wsi_bench", "slide_features", "test")
     default_tasks = ["Report"]
 
     print("--- Processing Train Set ---")

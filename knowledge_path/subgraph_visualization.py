@@ -1,77 +1,14 @@
-# import pandas as pd
-# import networkx as nx
-# import gravis as gv
-
-
-# df = pd.read_csv("/home/nadun/wd/vlm_histo/data/wsi_bench/custom_kg/relations.csv")
-
-# G = nx.Graph()
-
-
-# # Build Graph
-
-# for _, row in df.iterrows():
-#     src = row["reference_entity"]
-#     tgt = row["related_entity"]
-#     rel = row["relation_name"]
-#     G.add_edge(src, tgt, label=rel)
-
-# print(G)
-
-
-# # Extract 1-hop graph
-
-# center_node = "Head and Neck Squamous Cell Carcinoma" #add the histology you want to highlight here
-# subG = nx.ego_graph(G, center_node, radius=0.5)
-
-# ego_nodes = set(subG.nodes())
-# ego_edges = set(subG.edges())
-
-# #styling
-# for n in G.nodes():
-#     if n in ego_nodes:
-#         G.nodes[n]["color"] = "#d62728"  # red
-#         G.nodes[n]["size"] = 20
-#     else:
-#         G.nodes[n]["color"] = "#b5b3b3" # light grey
-#         G.nodes[n]["size"] = 20
-
-
-# if center_node in G.nodes():
-#     G.nodes[center_node]["color"] = "#8b0000"
-#     G.nodes[center_node]["size"] = 20
-
-
-# for u, v in G.edges():
-#     if (u, v) in ego_edges or (v, u) in ego_edges:
-#         G.edges[u, v]["color"] = "#d62728"
-#         G.edges[u, v]["width"] = 3.5
-#     else:
-#         G.edges[u, v]["color"] = "#5a5e5b"
-#         G.edges[u, v]["width"] = 0.5
-
-# fig = gv.d3(
-#     G,
-#     graph_height=900,
-#     edge_label_data_source="label",
-
-#     many_body_force_strength = -50,
-#     links_force_distance = 35,
-#     links_force_strength = 0.6,
-#     collision_force_radius = 8
-# )
-
-
-
-# fig.display()
-# # fig.export_html("test.html")
-
-
 import pandas as pd
 import networkx as nx
 import gravis as gv
+import os
+import sys
 
-df = pd.read_csv("/home/nadun/wd/vlm_histo/data/wsi_bench/custom_kg/relations.csv")
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import DATA_DIR
+
+df = pd.read_csv(os.path.join(DATA_DIR, "wsi_bench", "custom_kg", "relations.csv"))
 
 G = nx.Graph()
 

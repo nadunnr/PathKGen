@@ -1,24 +1,24 @@
 #!/bin/bash
 # Full pipeline: Stage 1 (projection) → Stage 2 (QLoRA) on WSI-Bench + Knowledge
-# Stage 1 best_model.pt is auto-detected and passed to Stage 2.
+source "$(dirname "$0")/../paths_config.sh"
 
 set -e  # Exit immediately on error
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-KNOWLEDGE_TRAIN_JSON="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
-KNOWLEDGE_TEST_JSON="/home/nadun/wd/vlm_histo/data/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+KNOWLEDGE_TRAIN_JSON="$DATASET_DIR/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
+KNOWLEDGE_TEST_JSON="$DATASET_DIR/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
 
-UMLS_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen-UMLS-7B-Instruct"
-DEFAULT_LLM_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-7B-Instruct"
-QWEN_15B_PATH="/home/nadun/wd/vlm_histo/checkpoints/Qwen2.5-1.5B-Instruct"
+UMLS_LLM_PATH="$CHECKPOINTS_DIR/Qwen-UMLS-7B-Instruct"
+DEFAULT_LLM_PATH="$CHECKPOINTS_DIR/Qwen2.5-7B-Instruct"
+QWEN_15B_PATH="$CHECKPOINTS_DIR/Qwen2.5-1.5B-Instruct"
 
-STAGE1_OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage1_wsi_bench_knowledge"
-STAGE2_OUTPUT_DIR="/home/nadun/wd/vlm_histo/checkpoints/stage2_wsi_bench_knowledge"
+STAGE1_OUTPUT_DIR="$CHECKPOINTS_DIR/stage1_wsi_bench_knowledge"
+STAGE2_OUTPUT_DIR="$CHECKPOINTS_DIR/stage2_wsi_bench_knowledge"
 
-STAGE1_RESULTS_DIR="/home/nadun/wd/vlm_histo/results/stage1_wsi_bench_knowledge"
-STAGE2_RESULTS_DIR="/home/nadun/wd/vlm_histo/results/stage2_wsi_bench_knowledge"
+STAGE1_RESULTS_DIR="$RESULTS_DIR/stage1_wsi_bench_knowledge"
+STAGE2_RESULTS_DIR="$RESULTS_DIR/stage2_results_knowledge"
 
 # ── Stage 1 Training ───────────────────────────────────────────────────────────
 echo ""
