@@ -39,7 +39,6 @@ pipeline/feature.py
 pipeline/test_titan_fresh.py
 pipeline/test_titan_output.py
 pipeline/test_titan.py
-*.txt
 kg/wsi-kg/.fuse_hidden000cdc4200000dcf
 pipeline/test_spatial_projection.py
 pipeline/test_wsi_bench_dataset.py
