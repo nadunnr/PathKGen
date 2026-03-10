@@ -13,13 +13,15 @@ from collections import Counter
 WSI_TRAIN_SET = os.path.join(DATASET_DIR, "wsi_bench_Report_with_features", "wsi_bench_Report_train.json")
 WSI_TEST_SET = os.path.join(DATASET_DIR, "wsi_bench_Report_with_features", "wsi_bench_Report_test.json")
 
-train_histology_preds = os.path.join(VLM_ROOT, "auxiliary_classifier", "output", "classifier_train_pred.csv")
-test_histology_preds = os.path.join(VLM_ROOT, "auxiliary_classifier", "output", "classifier_test_pred.csv")
+# train_histology_preds = os.path.join(VLM_ROOT, "auxiliary_classifier", "output", "classifier_train_pred.csv")
+# test_histology_preds = os.path.join(VLM_ROOT, "auxiliary_classifier", "output", "classifier_test_pred.csv")
+train_histology_preds = os.path.join(DATASET_DIR, "wsi_bench_Report_knowledge", "WSI-Bench-train_Report_knowledge.json")
+test_histology_preds = os.path.join(DATASET_DIR, "wsi_bench_Report_knowledge", "WSI-Bench-test_Report_knowledge.json")
 
 knowledge_path = os.path.join(DATA_DIR, "wsi_bench", "kg_data", "histology_descriptions_with_features.json")
 
 # ── Output paths ─────────────────────────────────────────────────────────────
-OUT_DIR = os.path.join(DATASET_DIR, "wsi_bench_Report_knowledge")
+OUT_DIR = os.path.join(DATASET_DIR)
 
 updated_knowledge_train_set = os.path.join(OUT_DIR, "WSI-Bench-train_Report_knowledge.json")
 updated_knowledge_test_set  = os.path.join(OUT_DIR, "WSI-Bench-test_Report_knowledge.json")
@@ -56,7 +58,7 @@ def write_log(log_path: str, source_path: str, dataset: list,
     stats = compute_stats(dataset)
 
     lines = []
-    lines.append(f"Enrichment Log for {source_path}")
+    lines.append(f"Enrichment Log for {os.path.relpath(source_path, DATA_DIR)}")
     lines.append("=" * 40)
     lines.append("")
 
@@ -106,22 +108,28 @@ def write_log(log_path: str, source_path: str, dataset: list,
 # ── Core enrichment functions ─────────────────────────────────────────────────
 
 def enrich_dataset(source_path: str, output_path: str, knowledge_dict: dict,
-                   pred_csv_path: str, log_path: str):
+                   pred_json_path: str, log_path: str):
     """
     General enrichment function:
-      - look up the predicted histology from pred_csv_path via tcga_id
+      - look up the predicted histology from pred_json_path via tcga_id
+        (reads the 'pred_histology' field from each entry in the JSON list)
       - replace 'knowledge' field with knowledge_dict[predicted_histology]
-      - drop entries whose tcga_id is missing in the predictions CSV or knowledge_dict
+      - drop entries whose tcga_id is missing in the predictions or knowledge_dict
     """
     with open(source_path, "r") as f:
         reports = json.load(f)
 
     print(f"  Loaded {len(reports)} reports from {source_path}")
 
-    # Build tcga_id → predicted_label mapping
-    pred_df = pd.read_csv(pred_csv_path)
-    pred_map = dict(zip(pred_df["tcga_id"].str.strip(), pred_df["predicted_label"].str.strip()))
-    print(f"  Loaded {len(pred_map)} predictions from {pred_csv_path}")
+    # Build tcga_id → pred_histology mapping from the knowledge JSON
+    with open(pred_json_path, "r") as f:
+        pred_entries = json.load(f)
+    pred_map = {
+        e["tcga_id"].strip(): e["pred_histology"].strip()
+        for e in pred_entries
+        if e.get("tcga_id") and e.get("pred_histology")
+    }
+    print(f"  Loaded {len(pred_map)} predictions from {pred_json_path}")
 
     updated = []
     dropped_ids = []
@@ -173,12 +181,12 @@ def main():
     # ── Training set ──
     print("\nProcessing Training Set...")
     print(f"  Input    : {WSI_TRAIN_SET}")
-    print(f"  Pred CSV : {train_histology_preds}")
+    print(f"  Pred JSON: {train_histology_preds}")
     print(f"  Output   : {updated_knowledge_train_set}")
     enrich_dataset(source_path=WSI_TRAIN_SET, 
                    output_path=updated_knowledge_train_set, 
                    knowledge_dict=knowledge_dict, 
-                   pred_csv_path=train_histology_preds, 
+                   pred_json_path=train_histology_preds, 
                    log_path=train_log_path)
 
     print("\n" + "=" * 80)
@@ -186,12 +194,12 @@ def main():
     # ── Test set ──
     print("\nProcessing Test Set...")
     print(f"  Input    : {WSI_TEST_SET}")
-    print(f"  Pred CSV : {test_histology_preds}")
+    print(f"  Pred JSON: {test_histology_preds}")
     print(f"  Output   : {updated_knowledge_test_set}")
     enrich_dataset(source_path=WSI_TEST_SET, 
                    output_path=updated_knowledge_test_set, 
                    knowledge_dict=knowledge_dict, 
-                   pred_csv_path=test_histology_preds, 
+                   pred_json_path=test_histology_preds, 
                    log_path=test_log_path)
 
     print("\n" + "=" * 80)

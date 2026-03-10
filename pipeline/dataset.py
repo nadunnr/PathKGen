@@ -1,9 +1,13 @@
 import os
 import json
+import sys
 import h5py
 import torch
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import DATA_DIR
 
 class WSI_Report_Dataset(Dataset):
     def __init__(self, json_path, dataset_format='wsi-bench', split='train', feature_key='tokens', use_knowledge_guidance=False):
@@ -81,7 +85,9 @@ class WSI_Report_Dataset(Dataset):
         Retrieve a single data point from the dataset.
         """
         item = self.dataset[idx]
-        feature_path = item['feature_path']
+        # feature_path is stored relative to DATA_DIR for portability;
+        # reconstruct the absolute path at load time.
+        feature_path = os.path.join(DATA_DIR, item['feature_path'])
         
         # Extract question and answer based on dataset format
         if self.has_questions:

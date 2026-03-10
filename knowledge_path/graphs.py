@@ -427,9 +427,9 @@ class Neo4jQuery:
 
 
 if __name__ == '__main__':
-    NEO4J_URL = "bolt://localhost:7687"
-    NEO4J_USER = "neo4j"
-    NEO4J_PASSWORD = "11111111"  # Change this to your Neo4j password
+    NEO4J_URL = "url" # Change this to your Neo4j URL
+    NEO4J_USER = "user" # Change this to your Neo4j username
+    NEO4J_PASSWORD = "password" # Change this to your Neo4j password
     
     NODES_CSV = os.path.join(DATA_DIR, "UMLS_sql", "neo4jdb", "v8", "nodes.csv")
     RELATIONSHIPS_CSV = os.path.join(DATA_DIR, "UMLS_sql", "neo4jdb", "v8", "relationships.csv")
@@ -445,57 +445,5 @@ if __name__ == '__main__':
     loader.update_node_definitions(os.path.join(DATA_DIR, "UMLS_sql", "neo4jdb", "v8", "definitions.csv"), batch_size=1000)
     loader.close()
 
-    # query = Neo4jQuery(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
-    # print(query.get_neighbors("C0206685", direction="outgoing", limit=50))
-    # # ============================================================
-    # # EXPERIMENT 2: Database Statistics
-    # # ============================================================
-    # print("\n" + "="*60)
-    # print("EXPERIMENT 2: Database Statistics")
-    # print("="*60)
-    # stats = query.get_statistics()
-    # print(json.dumps(stats, indent=2))
-    
-    # # ============================================================
-    # # EXPERIMENT 3: Search for entities
-    # # ============================================================
-    # print("\n" + "="*60)
-    # print("EXPERIMENT 3: Search for entities")
-    # print("="*60)
-    # search_term = "carcinoma"  # Change this to search for different terms
-    # print(f"Searching for: '{search_term}'")
-    # entities = query.search_entity(search_term)
-    # print(f"Found {len(entities)} entities:")
-    # for i, entity in enumerate(entities[:5], 1):  # Show first 5
-    #     print(f"  {i}. {entity['cui']}: {entity['name']}")
-    
-    # # ============================================================
-    # # EXPERIMENT 4: Get entity relationships
-    # # ============================================================
-    # if entities:
-    #     print("\n" + "="*60)
-    #     print("EXPERIMENT 4: Entity Relationships")
-    #     print("="*60)
-    #     test_cui = entities[0]['cui']
-    #     print(f"Getting relationships for: {test_cui} ({entities[0]['name']})")
-    #     relationships = query.get_entity_relationships(test_cui, limit=10)
-    #     print(f"Found {len(relationships)} relationships:")
-    #     for i, rel in enumerate(relationships[:5], 1):  # Show first 5
-    #         print(f"  {i}. {rel['source_name']} --[{rel['rel_type']}/{rel['rela']}]--> {rel['target_name']}")
-    
-    # # ============================================================
-    # # EXPERIMENT 5: Get neighbors
-    # # ============================================================
-    # if entities:
-    #     print("\n" + "="*60)
-    #     print("EXPERIMENT 5: Get Neighbors")
-    #     print("="*60)
-    #     test_cui = entities[0]['cui']
-    #     print(f"Getting neighbors for: {test_cui}")
-    #     neighbors = query.get_neighbors(test_cui, direction="both", limit=10)
-    #     print(f"Found {len(neighbors)} neighbors:")
-    #     for i, neighbor in enumerate(neighbors[:5], 1):
-    #         print(f"  {i}. {neighbor['name']} (via {neighbor['rel_type']})")
-    
 
 

@@ -57,7 +57,7 @@ from config import (
 # Default test dataset path
 DEFAULT_TEST_JSON = os.path.join(
     DATASET_DIR,
-    "wsi_bench_Report_knowledge", "WSI-Bench-test_Report_knowledge.json"
+    "WSI-Bench-test_Report_knowledge.json"
 )
 
 

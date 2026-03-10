@@ -12,8 +12,8 @@ echo "=================================================================="
 WSI_BENCH_TRAIN="$DATASET_DIR/wsi_bench_Report_with_features/wsi_bench_Report_train.json"
 WSI_BENCH_TEST="$DATASET_DIR/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
 
-KNOWLEDGE_TRAIN_JSON="$DATASET_DIR/wsi_bench_Report_knowledge/WSI-Bench-train_Report_knowledge.json"
-KNOWLEDGE_TEST_JSON="$DATASET_DIR/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+KNOWLEDGE_TRAIN_JSON="$DATASET_DIR/WSI-Bench-train_Report_knowledge.json"
+KNOWLEDGE_TEST_JSON="$DATASET_DIR/WSI-Bench-test_Report_knowledge.json"
 
 DEFAULT_LLM_PATH="$CHECKPOINTS_DIR/Qwen2.5-7B-Instruct"
 UMLS_LLM_PATH="$CHECKPOINTS_DIR/Qwen-UMLS-7B-Instruct"
@@ -21,7 +21,7 @@ UMLS_LLM_PATH="$CHECKPOINTS_DIR/Qwen-UMLS-7B-Instruct"
 # Configuration
 OUTPUT_DIR="$CHECKPOINTS_DIR/stage2_wsi_bench_knowledge"
 STAGE1_CHECKPOINT="$CHECKPOINTS_DIR/stage1_wsi_bench_knowledge/2026-02-24_10-55_vt128_ml768_e10_bs4/best_model.pt"
-STAGE2_RESULTS_DIR="$RESULTS_DIR/stage2_wsi_bench_knowledge"
+STAGE2_RESULTS_DIR="$RESULTS_DIR/stage2_wsi_bench"
 
 # Retry logic: repeat if error occurs
 python train_stage2.py \
@@ -40,7 +40,7 @@ python train_stage2.py \
     --eval_num_beams 4 \
     --eval_length_penalty 1.0 \
     --no_repeat_ngram_size 3 \
-    --epochs 2 \
+    --epochs 1 \
     --batch_size 4 \
     --gradient_accumulation_steps 32 \
     --num_workers 8 \

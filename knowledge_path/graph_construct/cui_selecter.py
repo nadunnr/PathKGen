@@ -22,9 +22,9 @@ def get_top_n_cuis(all_cuis, n):
     return top_n_cuis 
 
 if __name__ == "__main__":  
-    NEO4J_URL = "bolt://localhost:7687"
-    NEO4J_USER = "neo4j"
-    NEO4J_PASSWORD = "11111111"
+    NEO4J_URL = "url" # Change this to your Neo4j URL
+    NEO4J_USER = "user" # Change this to your Neo4j username
+    NEO4J_PASSWORD = "password" # Change this to your Neo4j password
 
     neo4j_query = Neo4jQuery(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
 

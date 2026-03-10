@@ -4,7 +4,7 @@ import sys
 
 # Import base directories
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from paths_config import DATA_DIR
+from paths_config import DATA_DIR, VLM_ROOT
 import re
 import argparse
 import random
@@ -163,7 +163,9 @@ def filter_wsi_bench(input_file, output_dir, tasks, feature_dir, split_ratio, se
             expected_filename = f"{tcga_id}.h5"
             
             if expected_filename in available_files:
-                item['feature_path'] = os.path.join(feature_dir, expected_filename)
+                abs_path = os.path.join(feature_dir, expected_filename)
+                # Store relative to DATA_DIR so the JSON is portable across machines
+                item['feature_path'] = os.path.relpath(abs_path, DATA_DIR)
                 filtered_data.append(item)
                 found_features += 1
             else:
@@ -196,14 +198,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Preset paths (Defaults)
-    input_train_base = os.path.join(DATA_DIR, "wsi_bench", "dataset", "wsi_bench_full")
+    input_train_base = os.path.join(DATA_DIR, "dataset", "wsi_bench_full")
     input_train_file = os.path.join(input_train_base, "WSI-Bench-train.json")
     input_test_file  = os.path.join(input_train_base, "WSI-Bench-test.json")
     
-    output_dir = args.output_dir if args.output_dir else os.path.join(DATA_DIR, "wsi_bench", "dataset")
+    output_dir = args.output_dir if args.output_dir else os.path.join(DATA_DIR, "dataset")
 
-    default_train_feature_dir = os.path.join(DATA_DIR, "wsi_bench", "slide_features", "train")
-    default_test_feature_dir = os.path.join(DATA_DIR, "wsi_bench", "slide_features", "test")
+    default_train_feature_dir = os.path.join(DATA_DIR, "slide_features", "train")
+    default_test_feature_dir = os.path.join(DATA_DIR, "slide_features", "test")
     default_tasks = ["Report"]
 
     print("--- Processing Train Set ---")

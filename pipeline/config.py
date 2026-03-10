@@ -81,8 +81,8 @@ WSI_BENCH_TRAIN = os.path.join(DATASET_DIR, "wsi_bench_Report_with_features", "w
 WSI_BENCH_TEST = os.path.join(DATASET_DIR, "wsi_bench_Report_with_features", "wsi_bench_Report_test.json")
 
 # WSI-Bench dataset paths WITH KNOWLEDGE
-WSI_BENCH_TRAIN_KNOWLEDGE = os.path.join(DATASET_DIR, "wsi_bench_Report_knowledge", "WSI-Bench-train_Report_knowledge.json")
-WSI_BENCH_TEST_KNOWLEDGE = os.path.join(DATASET_DIR, "wsi_bench_Report_knowledge", "WSI-Bench-test_Report_knowledge.json")
+WSI_BENCH_TRAIN_KNOWLEDGE = os.path.join(DATASET_DIR, "WSI-Bench-train_Report_knowledge.json")
+WSI_BENCH_TEST_KNOWLEDGE = os.path.join(DATASET_DIR, "WSI-Bench-test_Report_knowledge.json")
 
 # HistGen dataset path (contains splits internally)
 HISTGEN_DATASET = os.path.join(DATASET_DIR, "histgen_dataset.json")
@@ -211,8 +211,8 @@ class Stage1Config:
     """Configuration for Stage 1 contrastive alignment training."""
     
     # ---- Data ----
-    slide_features_dir: str = os.path.join(DATA_DIR, "wsi_bench", "slide_features")  # Has train/ and test/ subdirs
-    text_embeddings_dir: str = os.path.join(DATA_DIR, "wsi_bench", "text_embeddings")  # Has train/ and test/ subdirs
+    slide_features_dir: str = os.path.join(DATA_DIR, "slide_features")  # Has train/ and test/ subdirs
+    text_embeddings_dir: str = os.path.join(DATA_DIR, "text_embeddings")  # Has train/ and test/ subdirs
     
     
     # ---- TITAN Model ----

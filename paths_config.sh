@@ -1,8 +1,8 @@
 # Base project directory
-VLM_ROOT="/home/nadun/wd/vlm_histo"
+VLM_ROOT="/home/nadun/wd/PathKGen"
 
 # Key subdirectories
 DATA_DIR="$VLM_ROOT/data"
-DATASET_DIR="$DATA_DIR/wsi_bench/dataset"
+DATASET_DIR="$DATA_DIR/dataset"
 CHECKPOINTS_DIR="$VLM_ROOT/checkpoints"
 RESULTS_DIR="$VLM_ROOT/results"

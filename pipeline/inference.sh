@@ -4,8 +4,7 @@ source "$(dirname "$0")/../paths_config.sh"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-WSI_BENCH_TEST="$DATASET_DIR/wsi_bench_Report_with_features/wsi_bench_Report_test.json"
-KNOWLEDGE_TEST_JSON="$DATASET_DIR/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json"
+KNOWLEDGE_TEST_JSON="$DATASET_DIR/WSI-Bench-test_Report_knowledge.json"
 UMLS_LLM_PATH="$CHECKPOINTS_DIR/Qwen-UMLS-7B-Instruct"
 STAGE2_CHECKPOINT="$CHECKPOINTS_DIR/q7b_best/s2/checkpoint_epoch_1.pt"
 OUTPUT_DIR="$RESULTS_DIR/inference_wsi_bench"
@@ -22,7 +21,6 @@ python inference.py \
     --llm_path          "$UMLS_LLM_PATH" \
     --data_json         "$KNOWLEDGE_TEST_JSON" \
     --dataset_format    wsi-bench \
-    --use_knowledge_guidance \
     --feature_key       tokens \
     --val_batch_size    4  \
     --num_workers       8 \
@@ -30,6 +28,7 @@ python inference.py \
     --num_beams         4 \
     --length_penalty    1.0 \
     --no_repeat_ngram_size 3 \
+    --use_knowledge_guidance \
     --output_dir        "$OUTPUT_DIR"
 
 echo ""
