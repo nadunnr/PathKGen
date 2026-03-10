@@ -1,7 +1,5 @@
 # PathKGen
 
-A Vision-Language Model (VLM) pipeline for histopathology report generation, augmented with knowledge-graph-guided context derived from UMLS.
-
 ---
 
 ## Repository Structure
@@ -182,18 +180,6 @@ cd pipeline
 bash train_stage1.sh
 ```
 
-Key hyperparameters (configurable in `train_stage1.sh`):
-
-| Parameter | Value |
-|---|---|
-| Epochs | 8 |
-| Batch size | 1 (× 64 grad. accum.) |
-| Learning rate | 5e-4 |
-| Max sequence length | 1024 |
-| Early stopping patience | 2 |
-
-Checkpoints are saved to `checkpoints/stage1_wsi_bench/`.
-
 #### Stage 2 — Knowledge-Guided Fine-tuning
 
 Fine-tunes the full model (projection layer + LoRA adapters on the LLM) with knowledge-augmented inputs and BLEU-penalised loss.
@@ -202,19 +188,6 @@ Fine-tunes the full model (projection layer + LoRA adapters on the LLM) with kno
 cd pipeline
 bash train_stage2.sh
 ```
-
-Key hyperparameters:
-
-| Parameter | Value |
-|---|---|
-| Epochs | 1 |
-| Batch size | 4 (× 32 grad. accum.) |
-| Learning rate | 1e-4 |
-| LoRA rank / alpha | 128 / 256 |
-| Beam search (eval) | 4 beams |
-| Early stopping patience | 1 |
-
-Checkpoints are saved to `checkpoints/stage2_wsi_bench_knowledge/`.
 
 > Update the `STAGE1_CHECKPOINT` variable in `train_stage2.sh` to point to your best Stage 1 checkpoint before running.
 
