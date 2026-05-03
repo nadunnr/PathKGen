@@ -3,7 +3,7 @@ import sys
 
 # Import base directories
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from paths_config import DATASET_DIR
+from paths_config import DATASET_DIR, DATA_DIR
 import numpy as np
 import h5py
 import torch
@@ -48,6 +48,9 @@ def train():
     unique_sites = sorted(set(sites))
     site_to_idx = {s: i for i, s in enumerate(unique_sites)}
 
+    # Update feature paths
+    feature_paths = [os.path.join(DATA_DIR, fp) for fp in feature_paths]
+
     # Save vocabs to json
     save_vocabs(label_to_idx, site_to_idx)
     save_distribution(labels, sites)
@@ -90,6 +93,7 @@ def train():
 
     class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
 
+    
     # Infer embedding dim
     with h5py.File(feature_paths[0], 'r') as f:
         sample_emb = f['features'][:]
