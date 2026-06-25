@@ -1,5 +1,6 @@
 # Base project directory
-VLM_ROOT="/path/to/PathKGen"
+# VLM_ROOT="/path/to/PathKGen"
+VLM_ROOT="/home/nadun/wd/PathKGen"
 
 # Key subdirectories
 DATA_DIR="$VLM_ROOT/data"

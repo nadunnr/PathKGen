@@ -58,3 +58,4 @@ kg/graph_retrieval/graph.html
 kg/graph_retrieval/pathology_focus_graph.html
 *.html
 *.svg
+auxiliary_classifier/output/classifier_metrics.txt

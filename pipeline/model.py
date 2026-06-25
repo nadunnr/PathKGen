@@ -317,17 +317,30 @@ class VisionLanguageModel(nn.Module):
             Dictionary with 'loss' and 'logits'
         """
         batch_size = visual_features.shape[0]
-        
+
+        # Determine the device of the LLM input embeddings. For models
+        # loaded with device_map (auto/quantized), parameters may be
+        # sharded across devices; use the input embedding's device as the
+        # canonical device for inputs/embeddings.
+        embed_device = next(self.llm.get_input_embeddings().parameters()).device
+
         # 1. Project visual features to tokens (ensure dtype matches LLM)
-        # Input: [batch, N, 768] spatial features (e.g., N=128 from TITAN)
-        # Output: [batch, N, 3584] visual tokens
-        visual_features = visual_features.to(self.llm_dtype)
+        # Move visual features to the embedding device before projection so
+        # concatenation with prompt embeddings is device-consistent.
+        visual_features = visual_features.to(embed_device).to(self.llm_dtype)
         visual_tokens = self.projection(visual_features)  # Token-wise projection
         
         # Get actual number of visual tokens from the input (dynamic)
         num_visual_tokens = visual_tokens.shape[1]  # e.g., 128 for TITAN
         
         # 2. Get text embeddings
+        # Ensure input ids are on the embedding device when creating embeddings
+        input_ids = input_ids.to(embed_device)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(embed_device)
+        if labels is not None:
+            labels = labels.to(embed_device)
+
         inputs_embeds = self.llm.get_input_embeddings()(input_ids)  # [batch, seq_len, hidden_dim]
         
         # 3. Find image marker positions (assume same across batch since same template)
@@ -480,11 +493,11 @@ class VisionLanguageModel(nn.Module):
         self.eval()
 
         # Suppress use_cache + gradient_checkpointing incompatibility warning.
-        # gradient_checkpointing is only active during training; during .eval()
-        # generation we can safely re-enable the KV cache.
         llm_config_use_cache = getattr(self.llm.config, 'use_cache', True)
         self.llm.config.use_cache = True
-        # Ensure batch dimension
+
+        # Determine embedding device and ensure batch dim
+        embed_device = next(self.llm.get_input_embeddings().parameters()).device
         if visual_features.dim() == 2:
             visual_features = visual_features.unsqueeze(0)
         
@@ -501,14 +514,14 @@ class VisionLanguageModel(nn.Module):
                 prompt = GENERATION_PROMPT_NO_KNOWLEDGE.format(question=q)
 
         
-        # Project visual features (ensure dtype matches)
-        visual_features = visual_features.to(self.device).to(self.llm_dtype)
+        # Move visual features to embedding device and project
+        visual_features = visual_features.to(embed_device).to(self.llm_dtype)
         visual_tokens = self.projection(visual_features)  # [1, num_visual_tokens, hidden_dim]
         
         # Tokenize prompt
         prompt_ids = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
-        input_ids = prompt_ids.input_ids.to(self.device)
-        
+        input_ids = prompt_ids.input_ids.to(embed_device)
+
         # Get prompt embeddings
         prompt_embeds = self.llm.get_input_embeddings()(input_ids)  # [1, seq_len, hidden_dim]
         

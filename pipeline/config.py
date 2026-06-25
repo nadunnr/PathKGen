@@ -171,7 +171,7 @@ def extract_report_from_labels(tokenizer, label_ids):
 # Visual embedding settings
 DEFAULT_NUM_VISUAL_TOKENS = 128  # Default number of visual tokens
 DEFAULT_VISUAL_DIM = 768  # TITAN encoder feature dimension per token
-DEFAULT_LLM_HIDDEN_DIM = 3584  # Qwen 2.5 7B hidden dimension
+DEFAULT_LLM_HIDDEN_DIM = 3584  # Qwen 2.5 7B hidden dimension (3584)
 
 # NOTE: Number of visual tokens is now DYNAMIC based on encoder output
 # Typical values: 128 (TITAN), 256, 576 (Gigapath)
@@ -198,7 +198,7 @@ DEFAULT_USE_KNOWLEDGE_GUIDANCE = False
 # ============================================================================
 
 # Default paths (can be overridden by command-line arguments)
-DEFAULT_LLM_PATH = os.path.join(CHECKPOINTS_DIR, "Qwen-UMLS-7B-Instruct")
+DEFAULT_LLM_PATH = os.path.join(CHECKPOINTS_DIR, "Qwen2.5-1.5B-Instruct")
 DEFAULT_SLIDECHAT_CHECKPOINT = os.path.join(CHECKPOINTS_DIR, "SlideChat_Weight", "stage2_pth", "mp_rank_00_model_states.pt")
 DEFAULT_DATA_JSON = os.path.join(DATASET_DIR, "tcga_report_histgen", "primary_site_splits", "breast_dataset_split_0.7_0.1_0.2.json")
 DEFAULT_STAGE1_OUTPUT = os.path.join(CHECKPOINTS_DIR, "stage1")
@@ -206,45 +206,45 @@ DEFAULT_STAGE2_OUTPUT = os.path.join(CHECKPOINTS_DIR, "stage2")
 
 
 
-@dataclass
-class Stage1Config:
-    """Configuration for Stage 1 contrastive alignment training."""
+# @dataclass
+# class Stage1Config:
+#     """Configuration for Stage 1 contrastive alignment training."""
     
-    # ---- Data ----
-    slide_features_dir: str = os.path.join(DATA_DIR, "slide_features")  # Has train/ and test/ subdirs
-    text_embeddings_dir: str = os.path.join(DATA_DIR, "text_embeddings")  # Has train/ and test/ subdirs
+#     # ---- Data ----
+#     slide_features_dir: str = os.path.join(DATA_DIR, "slide_features")  # Has train/ and test/ subdirs
+#     text_embeddings_dir: str = os.path.join(DATA_DIR, "text_embeddings")  # Has train/ and test/ subdirs
     
     
-    # ---- TITAN Model ----
-    titan_model_name: str = "MahmoodLab/TITAN"
-    titan_dim: int = 768  # TITAN token dimension (128 tokens × 768-dim each)
+#     # ---- TITAN Model ----
+#     titan_model_name: str = "MahmoodLab/TITAN"
+#     titan_dim: int = 768  # TITAN token dimension (128 tokens × 768-dim each)
     
-    # ---- Projection Heads ----
-    hidden_dim: int = 1536        # Hidden dimension of MLP projectors
-    alignment_dim: int = 1536     # Output dimension of shared alignment space
+#     # ---- Projection Heads ----
+#     hidden_dim: int = 1536        # Hidden dimension of MLP projectors
+#     alignment_dim: int = 1536     # Output dimension of shared alignment space
     
-    # ---- Contrastive Loss (WSI-LLaVA paper) ----
-    temperature: float = 0.02   # InfoNCE temperature (paper: τ=0.02)
+#     # ---- Contrastive Loss (WSI-LLaVA paper) ----
+#     temperature: float = 0.02   # InfoNCE temperature (paper: τ=0.02)
     
-    # ---- Training (WSI-LLaVA paper) ----
-    lr: float = 1e-3            # Learning rate (paper: 0.001)
-    weight_decay: float = 0.01
-    batch_size: int = 64        # Batch size (paper: 64)
-    epochs: int = 50            # Total epochs (paper: 50)
-    warmup_ratio: float = 0.03  # Warmup fraction of total steps
+#     # ---- Training (WSI-LLaVA paper) ----
+#     lr: float = 1e-3            # Learning rate (paper: 0.001)
+#     weight_decay: float = 0.01
+#     batch_size: int = 64        # Batch size (paper: 64)
+#     epochs: int = 50            # Total epochs (paper: 50)
+#     warmup_ratio: float = 0.03  # Warmup fraction of total steps
     
-    # ---- Text Encoding ----
-    context_length: int = 128   # TITAN text context length
+#     # ---- Text Encoding ----
+#     context_length: int = 128   # TITAN text context length
     
-    # ---- Checkpointing ----
-    checkpoint_dir: str = os.path.join(CHECKPOINTS_DIR, "stage1")
-    save_every_n_epochs: int = 5
+#     # ---- Checkpointing ----
+#     checkpoint_dir: str = os.path.join(CHECKPOINTS_DIR, "stage1")
+#     save_every_n_epochs: int = 5
     
-    # ---- System ----
-    device: str = "cuda"
-    num_workers: int = 4
-    seed: int = 42
-    log_interval: int = 10      # Log every N batches
+#     # ---- System ----
+#     device: str = "cuda"
+#     num_workers: int = 4
+#     seed: int = 42
+#     log_interval: int = 10      # Log every N batches
     
-    def __post_init__(self):
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
+#     def __post_init__(self):
+#         os.makedirs(self.checkpoint_dir, exist_ok=True)
