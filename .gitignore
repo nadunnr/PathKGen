@@ -59,3 +59,5 @@ kg/graph_retrieval/pathology_focus_graph.html
 *.html
 *.svg
 auxiliary_classifier/output/classifier_metrics.txt
+supplymentary_examples
+wsi_bench_metrics

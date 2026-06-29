@@ -5,9 +5,9 @@ source "$(dirname "$0")/../paths_config.sh"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 KNOWLEDGE_TEST_JSON="$DATASET_DIR/WSI-Bench-test_Report_knowledge.json"
-UMLS_LLM_PATH="$CHECKPOINTS_DIR/Qwen-UMLS-7B-Instruct"
+LLM_PATH="$CHECKPOINTS_DIR/Qwen2.5-7B-Instruct"
 STAGE2_CHECKPOINT="$CHECKPOINTS_DIR/q7b_best/s2/checkpoint_epoch_1.pt"
-OUTPUT_DIR="$RESULTS_DIR/inference_wsi_bench"
+OUTPUT_DIR="$RESULTS_DIR/stage2_wsi_bench_knowledge_qwen7b_best/2026-06-25"
 
 echo "Starting Inference with WSI-Bench Dataset"
 echo "================================================="
@@ -18,7 +18,7 @@ echo ""
 
 python inference.py \
     --stage2_checkpoint "$STAGE2_CHECKPOINT" \
-    --llm_path          "$UMLS_LLM_PATH" \
+    --llm_path          "$LLM_PATH" \
     --data_json         "$KNOWLEDGE_TEST_JSON" \
     --dataset_format    wsi-bench \
     --feature_key       tokens \
