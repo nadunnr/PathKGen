@@ -36,7 +36,8 @@ python train_stage1.py \
     --max_length 1024 \
     --val_batch_size 1 \
     --output_dir "$OUTPUT_DIR" \
-    --use_knowledge_guidance
+    --use_knowledge_guidance \
+    --knowledge_mode full
 
 echo ""
 echo "Stage 1 training complete! Checkpoints saved to: $OUTPUT_DIR"

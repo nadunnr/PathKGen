@@ -72,6 +72,45 @@ Use to help, but verify visually.
 <|im_start|>assistant
 {answer}<|im_end|>"""
 
+# WSI-Bench with predicted histology class only
+TRAINING_PROMPT_WSI_BENCH_CLASS_ONLY = """<|im_start|>system
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
+<|im_start|>user
+<image_start><image_end>
+Predicted histology type (97.52% accurate):
+{knowledge}
+Use to help, but verify visually.
+
+{question}<|im_end|>
+<|im_start|>assistant
+{answer}<|im_end|>"""
+
+# WSI-Bench with KG features only, histology class withheld
+TRAINING_PROMPT_WSI_BENCH_KG_ONLY = """<|im_start|>system
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
+<|im_start|>user
+<image_start><image_end>
+Generic pathology knowledge associated with the predicted histology type. The site is exact.
+{knowledge}
+Use to help, but verify visually.
+
+{question}<|im_end|>
+<|im_start|>assistant
+{answer}<|im_end|>"""
+
+# WSI-Bench with site only
+TRAINING_PROMPT_WSI_BENCH_SITE_ONLY = """<|im_start|>system
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
+<|im_start|>user
+<image_start><image_end>
+The anatomical site is exact:
+{knowledge}
+Use to help, but verify visually.
+
+{question}<|im_end|>
+<|im_start|>assistant
+{answer}<|im_end|>"""
+
 # ============================================================================
 # DATASET PATHS
 # ============================================================================
@@ -108,6 +147,45 @@ You are a pathology assistant specialized in analyzing whole slide images of tis
 <|im_start|>user
 <image_start><image_end>
 Generic knowledge regarding histology type (97.52% accurate). The site is exact.
+{knowledge}
+Use to help, but verify visually.
+
+{question}<|im_end|>
+<|im_start|>assistant
+"""
+
+# Inference with predicted histology class only
+GENERATION_PROMPT_CLASS_ONLY = """<|im_start|>system
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
+<|im_start|>user
+<image_start><image_end>
+Predicted histology type (97.52% accurate):
+{knowledge}
+Use to help, but verify visually.
+
+{question}<|im_end|>
+<|im_start|>assistant
+"""
+
+# Inference with KG features only, histology class withheld
+GENERATION_PROMPT_KG_ONLY = """<|im_start|>system
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
+<|im_start|>user
+<image_start><image_end>
+Generic pathology knowledge associated with the predicted histology type. The site is exact.
+{knowledge}
+Use to help, but verify visually.
+
+{question}<|im_end|>
+<|im_start|>assistant
+"""
+
+# Inference with site only
+GENERATION_PROMPT_SITE_ONLY = """<|im_start|>system
+You are a pathology assistant specialized in analyzing whole slide images of tissue samples. Provide detailed, accurate diagnostic observations based on microscopic features.<|im_end|>
+<|im_start|>user
+<image_start><image_end>
+The anatomical site is exact:
 {knowledge}
 Use to help, but verify visually.
 
@@ -163,7 +241,6 @@ def extract_report_from_labels(tokenizer, label_ids):
     return tokenizer.decode(label_ids, skip_special_tokens=True).strip()
 
 
-
 # ============================================================================
 # MODEL CONFIGURATION
 # ============================================================================
@@ -203,48 +280,3 @@ DEFAULT_SLIDECHAT_CHECKPOINT = os.path.join(CHECKPOINTS_DIR, "SlideChat_Weight",
 DEFAULT_DATA_JSON = os.path.join(DATASET_DIR, "tcga_report_histgen", "primary_site_splits", "breast_dataset_split_0.7_0.1_0.2.json")
 DEFAULT_STAGE1_OUTPUT = os.path.join(CHECKPOINTS_DIR, "stage1")
 DEFAULT_STAGE2_OUTPUT = os.path.join(CHECKPOINTS_DIR, "stage2")
-
-
-
-# @dataclass
-# class Stage1Config:
-#     """Configuration for Stage 1 contrastive alignment training."""
-    
-#     # ---- Data ----
-#     slide_features_dir: str = os.path.join(DATA_DIR, "slide_features")  # Has train/ and test/ subdirs
-#     text_embeddings_dir: str = os.path.join(DATA_DIR, "text_embeddings")  # Has train/ and test/ subdirs
-    
-    
-#     # ---- TITAN Model ----
-#     titan_model_name: str = "MahmoodLab/TITAN"
-#     titan_dim: int = 768  # TITAN token dimension (128 tokens × 768-dim each)
-    
-#     # ---- Projection Heads ----
-#     hidden_dim: int = 1536        # Hidden dimension of MLP projectors
-#     alignment_dim: int = 1536     # Output dimension of shared alignment space
-    
-#     # ---- Contrastive Loss (WSI-LLaVA paper) ----
-#     temperature: float = 0.02   # InfoNCE temperature (paper: τ=0.02)
-    
-#     # ---- Training (WSI-LLaVA paper) ----
-#     lr: float = 1e-3            # Learning rate (paper: 0.001)
-#     weight_decay: float = 0.01
-#     batch_size: int = 64        # Batch size (paper: 64)
-#     epochs: int = 50            # Total epochs (paper: 50)
-#     warmup_ratio: float = 0.03  # Warmup fraction of total steps
-    
-#     # ---- Text Encoding ----
-#     context_length: int = 128   # TITAN text context length
-    
-#     # ---- Checkpointing ----
-#     checkpoint_dir: str = os.path.join(CHECKPOINTS_DIR, "stage1")
-#     save_every_n_epochs: int = 5
-    
-#     # ---- System ----
-#     device: str = "cuda"
-#     num_workers: int = 4
-#     seed: int = 42
-#     log_interval: int = 10      # Log every N batches
-    
-#     def __post_init__(self):
-#         os.makedirs(self.checkpoint_dir, exist_ok=True)

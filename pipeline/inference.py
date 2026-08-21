@@ -118,6 +118,11 @@ def parse_args():
         help="Pass knowledge text to the model during generation."
     )
     parser.add_argument(
+        "--knowledge_mode", type=str, default="full",
+        choices=["full", "class_only", "kg_only", "site_only"],
+        help="Mode for knowledge guidance."
+    )
+    parser.add_argument(
         "--max_length", type=int, default=DEFAULT_MAX_LENGTH,
         help="Maximum tokenised sequence length for the data collator."
     )
@@ -285,6 +290,7 @@ def run_inference(model, dataloader, args, device, tokenizer):
                 prompt=None,            # auto-selects prompt from config
                 question=question_text,
                 knowledge_text=knowledge_text,
+                knowledge_mode=getattr(args, 'knowledge_mode', 'full'),
                 max_new_tokens=args.max_new_tokens,
                 temperature=0.0,        # always greedy/beam — matches training eval
                 top_p=1.0,             # no nucleus filtering — matches training eval
@@ -357,6 +363,7 @@ def main():
         dataset_format=args.dataset_format,
         max_length=args.max_length,
         use_knowledge_guidance=args.use_knowledge_guidance,
+        knowledge_mode=args.knowledge_mode
     )
 
     dataloader = DataLoader(

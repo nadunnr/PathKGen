@@ -29,6 +29,7 @@ python inference.py \
     --length_penalty    1.0 \
     --no_repeat_ngram_size 3 \
     --use_knowledge_guidance \
+    --knowledge_mode full \
     --output_dir        "$OUTPUT_DIR"
 
 echo ""

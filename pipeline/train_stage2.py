@@ -104,6 +104,11 @@ def parse_args():
     # Knowledge guidance arguments
     parser.add_argument("--use_knowledge_guidance", action="store_true",
                        help="Enable knowledge graph guidance for report generation")
+    parser.add_argument(
+        "--knowledge_mode", type=str, default="full",
+        choices=["full", "class_only", "kg_only", "site_only"],
+        help="Mode for knowledge guidance."
+    )
     parser.add_argument("--max_knowledge_tokens", type=int, default=64,
                        help="Maximum length for knowledge text tokens")
     
@@ -245,6 +250,7 @@ def compute_bleu_penalty_loss(
                 prompt=None,             # auto-select based on dataset
                 question=q_text,         # per-sample question
                 knowledge_text=k_text,   # per-sample knowledge
+                knowledge_mode=getattr(args, 'knowledge_mode', 'full'),
                 max_new_tokens=max_gen_tokens,
                 temperature=0.0,         # greedy — matches eval
                 num_beams=1,
@@ -475,6 +481,7 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
                     prompt=None,  # Let model auto-select based on knowledge_text
                     question=question_text,
                     knowledge_text=knowledge_text,
+                    knowledge_mode=getattr(args, 'knowledge_mode', 'full'),
                     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
                     temperature=0.0,  # Greedy/beam search for evaluation
                     top_p=1.0,
@@ -573,7 +580,8 @@ def evaluate_best_model(checkpoint_path, args, device):
         tokenizer=tokenizer,
         dataset_format=args.dataset_format,
         max_length=args.max_length,
-        use_knowledge_guidance=args.use_knowledge_guidance
+        use_knowledge_guidance=args.use_knowledge_guidance,
+        knowledge_mode=args.knowledge_mode
     )
     
     # Create validation dataloader
@@ -736,7 +744,8 @@ def main():
         tokenizer=tokenizer,
         dataset_format=args.dataset_format,
         max_length=args.max_length,
-        use_knowledge_guidance=args.use_knowledge_guidance
+        use_knowledge_guidance=args.use_knowledge_guidance,
+        knowledge_mode=args.knowledge_mode
     )
     
     # Create dataloaders

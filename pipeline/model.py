@@ -451,6 +451,7 @@ class VisionLanguageModel(nn.Module):
         prompt: str = None,
         question: str = None,
         knowledge_text: str = None,
+        knowledge_mode: str = 'full',
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.9,
@@ -488,7 +489,20 @@ class VisionLanguageModel(nn.Module):
         Returns:
             Generated report text
         """
-        from config import GENERATION_PROMPT_NO_KNOWLEDGE, GENERATION_PROMPT_WITH_KNOWLEDGE
+        from config import (
+            GENERATION_PROMPT_NO_KNOWLEDGE,
+            GENERATION_PROMPT_WITH_KNOWLEDGE,
+            GENERATION_PROMPT_CLASS_ONLY,
+            GENERATION_PROMPT_KG_ONLY,
+            GENERATION_PROMPT_SITE_ONLY,
+        )
+
+        _KNOWLEDGE_PROMPT_MAP = {
+            'full':       GENERATION_PROMPT_WITH_KNOWLEDGE,
+            'class_only': GENERATION_PROMPT_CLASS_ONLY,
+            'kg_only':    GENERATION_PROMPT_KG_ONLY,
+            'site_only':  GENERATION_PROMPT_SITE_ONLY,
+        }
         
         self.eval()
 
@@ -506,7 +520,9 @@ class VisionLanguageModel(nn.Module):
             # Fallback question if none provided
             q = question if question else "Analyze the whole slide histopathology image and provide a concise pathology diagnosis."
             if knowledge_text is not None:
-                prompt = GENERATION_PROMPT_WITH_KNOWLEDGE.format(
+                # Use the mode-specific template so inference framing matches training
+                gen_template = _KNOWLEDGE_PROMPT_MAP.get(knowledge_mode, GENERATION_PROMPT_WITH_KNOWLEDGE)
+                prompt = gen_template.format(
                     knowledge=knowledge_text,
                     question=q
                 )

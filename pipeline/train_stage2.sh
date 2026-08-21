@@ -54,6 +54,7 @@ python train_stage2.py \
     --val_batch_size 4 \
     --output_dir "$STAGE2_OUTPUT_DIR" \
     --use_knowledge_guidance \
+    --knowledge_mode full \
 
 if [ $? -eq 0 ]; then
     echo ""

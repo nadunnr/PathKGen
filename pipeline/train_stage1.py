@@ -97,6 +97,11 @@ def parse_args():
     # Knowledge guidance arguments
     parser.add_argument("--use_knowledge_guidance", action="store_true",
                        help="Enable knowledge graph guidance for report generation (recommended if Stage 2 will use it)")
+    parser.add_argument(
+        "--knowledge_mode", type=str, default="full",
+        choices=["full", "class_only", "kg_only", "site_only"],
+        help="Mode for knowledge guidance."
+    )
     parser.add_argument("--max_knowledge_tokens", type=int, default=64,
                        help="Maximum length for knowledge text tokens")
     
@@ -269,6 +274,7 @@ def validate(model, dataloader, epoch, args, device, tokenizer=None, compute_met
                     prompt=None,
                     question=question_text,
                     knowledge_text=knowledge_text,
+                    knowledge_mode=getattr(args, 'knowledge_mode', 'full'),
                     max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
                     temperature=0.0,
                     top_p=1.0
@@ -343,7 +349,8 @@ def evaluate_best_model(checkpoint_path, args, device):
     data_collator = VLMDataCollator(
         tokenizer=tokenizer,
         max_length=args.max_length,
-        use_knowledge_guidance=args.use_knowledge_guidance
+        use_knowledge_guidance=args.use_knowledge_guidance,
+        knowledge_mode=args.knowledge_mode
     )
     
     # Create validation dataloader
@@ -495,7 +502,8 @@ def main():
         tokenizer=tokenizer,
         dataset_format=args.dataset_format,
         max_length=args.max_length,
-        use_knowledge_guidance=args.use_knowledge_guidance
+        use_knowledge_guidance=args.use_knowledge_guidance,
+        knowledge_mode=args.knowledge_mode
     )
     
     # Create dataloaders

@@ -4,6 +4,7 @@ Data collator for Vision-Language Model training.
 Handles batching of slide features and text prompt_message with proper padding.
 """
 
+import os
 import torch
 from typing import Dict, List, Any
 from transformers import PreTrainedTokenizer
@@ -12,6 +13,9 @@ from config import (
     TRAINING_PROMPT_WITH_KNOWLEDGE,
     TRAINING_PROMPT_WSI_BENCH,
     TRAINING_PROMPT_WSI_BENCH_KNOWLEDGE,
+    TRAINING_PROMPT_WSI_BENCH_CLASS_ONLY,
+    TRAINING_PROMPT_WSI_BENCH_KG_ONLY,
+    TRAINING_PROMPT_WSI_BENCH_SITE_ONLY,
     IMAGE_START_TOKEN,
     IMAGE_END_TOKEN,
     CHECKPOINTS_DIR
@@ -35,6 +39,7 @@ class VLMDataCollator:
         max_length: int = 512,
         padding: str = "longest",
         use_knowledge_guidance: bool = False,
+        knowledge_mode: str = 'full',
     ):
         """
         Args:
@@ -49,11 +54,21 @@ class VLMDataCollator:
         self.max_length = max_length
         self.padding = padding
         self.use_knowledge_guidance = use_knowledge_guidance
+        self.knowledge_mode = knowledge_mode
         
         # Select appropriate prompt template based on dataset format and knowledge guidance
         if dataset_format == 'wsi-bench':
             if use_knowledge_guidance:
-                self.prompt_template = TRAINING_PROMPT_WSI_BENCH_KNOWLEDGE
+                if knowledge_mode == 'full':
+                    self.prompt_template = TRAINING_PROMPT_WSI_BENCH_KNOWLEDGE
+                elif knowledge_mode == 'class_only':
+                    self.prompt_template = TRAINING_PROMPT_WSI_BENCH_CLASS_ONLY
+                elif knowledge_mode == 'kg_only':
+                    self.prompt_template = TRAINING_PROMPT_WSI_BENCH_KG_ONLY
+                elif knowledge_mode == 'site_only':
+                    self.prompt_template = TRAINING_PROMPT_WSI_BENCH_SITE_ONLY
+                else:
+                    raise ValueError(f"Invalid knowledge mode: {knowledge_mode}")
             else:
                 self.prompt_template = TRAINING_PROMPT_WSI_BENCH
         else:  # histgen
