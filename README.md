@@ -1,6 +1,24 @@
-# PathKGen
 
-Repository for the paper PathKGen: Pathology Knowledge Assisted MLLM for Explainable Histopathology
+<h1 align="center">PathKGen: Pathology Knowledge Assisted MLLM for Explainable Histopathology</h1>
+<p align="center">
+  Nadun Rajapaksha*, Sandun Herath*, Devnith Wijesinghe*, Isiri Withanawasam*, Hasindri Watawana, Ranga Rodrigo
+  <br>
+  <small>(* indicates equal contribution)</small>
+</p>
+
+<!-- Replace the placeholder href values with the release URLs. -->
+<p align="center">
+  <a href="#"><img src="https://img.shields.io/badge/arXiv-Paper-B31B1B?logo=arxiv&amp;logoColor=white" alt="arXiv Paper"></a>
+  <a href="#"><img src="https://img.shields.io/badge/🤗_Hugging_Face-Models-yellow" alt="Hugging Face Models"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Project-Page-blue" alt="Project Page"></a>
+</p>
+
+> This paper has been accepted to WACV 2027! 🎉
+
+![Overall pipeline arcihtecture](assets/main.jpg)
+
+## Overview
+We introduce PathKGen, a knowledge graph–assisted MLLM for histopathology report generation. PathKGen has two main branches: (1) a visual path that learns visual token inputs to the MLLM using pathology foundation models, and (2) a knowledge path that learns knowledge token inputs by extracting key morphological features of WSIs through querying a pathology-specific knowledge graph.
 
 ## Repository Structure
 
