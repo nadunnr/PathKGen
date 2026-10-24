@@ -58,6 +58,9 @@ kg/graph_retrieval/graph.html
 kg/graph_retrieval/pathology_focus_graph.html
 *.html
 *.svg
+# Keep public documentation assets trackable.
+!/assets/
+!/assets/**
 auxiliary_classifier/output/classifier_metrics.txt
 supplymentary_examples
 wsi_bench_metrics
