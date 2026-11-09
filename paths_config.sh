@@ -1,6 +1,5 @@
-# Base project directory
-# VLM_ROOT="/path/to/PathKGen"
-VLM_ROOT="/home/nadun/wd/PathKGen"
+# Base project directory: the repository root by default (override with `export VLM_ROOT=/path/to/PathKGen`)
+VLM_ROOT="${VLM_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 # Key subdirectories
 DATA_DIR="$VLM_ROOT/data"

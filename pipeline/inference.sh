@@ -6,8 +6,8 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 KNOWLEDGE_TEST_JSON="$DATASET_DIR/WSI-Bench-test_Report_knowledge.json"
 LLM_PATH="$CHECKPOINTS_DIR/Qwen2.5-7B-Instruct"
-STAGE2_CHECKPOINT="$CHECKPOINTS_DIR/q7b_best/s2/checkpoint_epoch_1.pt"
-OUTPUT_DIR="$RESULTS_DIR/stage2_wsi_bench_knowledge_qwen7b_best/2026-06-25"
+STAGE2_CHECKPOINT="${STAGE2_CHECKPOINT:-$CHECKPOINTS_DIR/pathkgen_weights/pathkgen_stage2/checkpoint_epoch_1.pt}"
+OUTPUT_DIR="$RESULTS_DIR/inference_wsi_bench"
 
 echo "Starting Inference with WSI-Bench Dataset"
 echo "================================================="

@@ -19,7 +19,7 @@ DEFAULT_LLM_PATH="$CHECKPOINTS_DIR/Qwen2.5-7B-Instruct"
 
 # Configuration
 STAGE2_OUTPUT_DIR="$CHECKPOINTS_DIR/stage2_wsi_bench_knowledge_qwen7b"
-STAGE1_CHECKPOINT="$CHECKPOINTS_DIR/stage1_wsi_bench_qwen7b/2026-06-25_00-22_vt128_ml1024_e8_bs1/checkpoint_epoch_8.pt"
+STAGE1_CHECKPOINT="${STAGE1_CHECKPOINT:-$CHECKPOINTS_DIR/pathkgen_weights/pathkgen_stage1/stage1.pt}"
 STAGE2_RESULTS_DIR="$RESULTS_DIR/stage2_wsi_bench_knowledge_qwen7b"
 
 # Retry logic: repeat if error occurs
@@ -58,8 +58,9 @@ python train_stage2.py \
 
 if [ $? -eq 0 ]; then
     echo ""
-    echo "Training complete! Checkpoints saved to: $OUTPUT_DIR"
+    echo "Training complete! Checkpoints saved to: $STAGE2_OUTPUT_DIR"
 else
     echo ""
     echo "Error occurred during training."
+    exit 1
 fi
