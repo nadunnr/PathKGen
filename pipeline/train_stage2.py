@@ -29,7 +29,7 @@ from model import VisionLanguageModel
 from dataset import WSI_Report_Dataset
 from data_collator import VLMDataCollator
 from config import (GENERATION_PROMPT, TRAINING_PROMPT_TEMPLATE,
-                    DEFAULT_LLM_PATH, DEFAULT_SLIDECHAT_CHECKPOINT,
+                    DEFAULT_LLM_PATH,
                     DEFAULT_DATA_JSON, DEFAULT_STAGE2_OUTPUT,
                     DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS,
                     DEFAULT_MAX_LENGTH, DEFAULT_MAX_NEW_TOKENS,
@@ -62,8 +62,8 @@ def parse_args():
                        default=DEFAULT_LLM_PATH,
                        help="Path to base LLM")
     parser.add_argument("--slidechat_checkpoint", type=str,
-                       default=DEFAULT_SLIDECHAT_CHECKPOINT,
-                       help="Path to SlideChat weights")
+                       default=None,
+                       help="Path to SlideChat weights (optional; unused by default)")
     parser.add_argument("--stage1_checkpoint", type=str, default=None,
                        help="Path to Stage 1 checkpoint (for projection weights). "
                             "Required unless --init_from is provided.")
@@ -194,6 +194,7 @@ def compute_bleu_penalty_loss(
     baseline_bleu=None,
     questions=None,       # Bug 1 fix: per-sample question strings
     knowledge_texts=None, # Bug 1 fix: per-sample knowledge strings
+    knowledge_mode='full',
 ):
     """
     Compute BLEU-weighted CE loss (hard-example mining style).
@@ -250,7 +251,7 @@ def compute_bleu_penalty_loss(
                 prompt=None,             # auto-select based on dataset
                 question=q_text,         # per-sample question
                 knowledge_text=k_text,   # per-sample knowledge
-                knowledge_mode=getattr(args, 'knowledge_mode', 'full'),
+                knowledge_mode=knowledge_mode,
                 max_new_tokens=max_gen_tokens,
                 temperature=0.0,         # greedy — matches eval
                 num_beams=1,
@@ -348,6 +349,7 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, args, device, to
                     baseline_bleu=running_bleu_baseline,
                     questions=questions_batch,
                     knowledge_texts=knowledge_batch,
+                    knowledge_mode=getattr(args, 'knowledge_mode', 'full'),
                 )
                 if bleu_penalty is not None:   # None when all samples skipped
                     bleu_computed = True

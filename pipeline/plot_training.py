@@ -18,8 +18,7 @@ from config import CHECKPOINTS_DIR
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Plot training history")
-    default_s1 = os.path.join(CHECKPOINTS_DIR, "stage1", "23.01.2026_epoch 50", "training_history.json")
-    parser.add_argument("--stage1_history", type=str, default=default_s1,
+    parser.add_argument("--stage1_history", type=str, default=None,
                        help="Path to Stage 1 training_history.json")
     parser.add_argument("--stage2_history", type=str, default=None,
                        help="Path to Stage 2 training_history.json")

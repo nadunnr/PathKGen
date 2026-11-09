@@ -1,8 +1,7 @@
 import os
 
-# Base project directory
-# VLM_ROOT = "/path/to/PathKGen"
-VLM_ROOT = "/home/nadun/wd/PathKGen"
+# Base project directory: the repository root by default (override with `export VLM_ROOT=/path/to/PathKGen`)
+VLM_ROOT = os.environ.get("VLM_ROOT", os.path.dirname(os.path.abspath(__file__)))
 
 # Key subdirectories
 DATA_DIR = os.path.join(VLM_ROOT, "data")

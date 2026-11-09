@@ -1,10 +1,15 @@
 import json
 import os
+import sys
+
+# Import base directories
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from paths_config import DATASET_DIR, RESULTS_DIR
 
 # Define paths
-CHERRY_PICKED_PATH = '/home/nadun/wd/datasets/wsi_bench/results/qwen_7b_bestresults/cherry_picked.json'
-REPORT_KNOWLEDGE_PATH = '/home/nadun/wd/datasets/wsi_bench/dataset/wsi_bench_Report_knowledge/WSI-Bench-test_Report_knowledge.json'
-OUTPUT_PATH = '/home/nadun/wd/datasets/wsi_bench/results/qwen_7b_bestresults/cherry_picked_updated.json'
+CHERRY_PICKED_PATH = os.path.join(RESULTS_DIR, 'cherry_picked.json')
+REPORT_KNOWLEDGE_PATH = os.path.join(DATASET_DIR, 'WSI-Bench-test_Report_knowledge.json')
+OUTPUT_PATH = os.path.join(RESULTS_DIR, 'cherry_picked_updated.json')
 
 def update_cherry_picked():
     # 1. Load the knowledge report

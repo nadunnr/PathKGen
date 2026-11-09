@@ -25,7 +25,7 @@ from model import VisionLanguageModel
 from dataset import WSI_Report_Dataset
 from data_collator import VLMDataCollator
 from config import (GENERATION_PROMPT, TRAINING_PROMPT_TEMPLATE,
-                    DEFAULT_LLM_PATH, DEFAULT_SLIDECHAT_CHECKPOINT,
+                    DEFAULT_LLM_PATH,
                     DEFAULT_DATA_JSON, DEFAULT_STAGE1_OUTPUT,
                     DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS,
                     DEFAULT_MAX_LENGTH, DEFAULT_MAX_NEW_TOKENS,
@@ -58,8 +58,8 @@ def parse_args():
                        default=DEFAULT_LLM_PATH,
                        help="Path to base LLM")
     parser.add_argument("--slidechat_checkpoint", type=str,
-                       default=DEFAULT_SLIDECHAT_CHECKPOINT,
-                       help="Path to SlideChat weights")
+                       default=None,
+                       help="Path to SlideChat weights (optional; unused by default)")
     parser.add_argument("--visual_dim", type=int, default=DEFAULT_VISUAL_DIM,
                        help="Dimension of slide features (TITAN encoder)")
     parser.add_argument("--num_visual_tokens", type=int, default=DEFAULT_NUM_VISUAL_TOKENS,

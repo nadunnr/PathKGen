@@ -276,7 +276,6 @@ DEFAULT_USE_KNOWLEDGE_GUIDANCE = False
 
 # Default paths (can be overridden by command-line arguments)
 DEFAULT_LLM_PATH = os.path.join(CHECKPOINTS_DIR, "Qwen2.5-1.5B-Instruct")
-DEFAULT_SLIDECHAT_CHECKPOINT = os.path.join(CHECKPOINTS_DIR, "SlideChat_Weight", "stage2_pth", "mp_rank_00_model_states.pt")
 DEFAULT_DATA_JSON = os.path.join(DATASET_DIR, "tcga_report_histgen", "primary_site_splits", "breast_dataset_split_0.7_0.1_0.2.json")
 DEFAULT_STAGE1_OUTPUT = os.path.join(CHECKPOINTS_DIR, "stage1")
 DEFAULT_STAGE2_OUTPUT = os.path.join(CHECKPOINTS_DIR, "stage2")

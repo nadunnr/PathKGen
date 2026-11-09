@@ -8,7 +8,7 @@ import os
 import warnings
 from config import (DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS,
                     DEFAULT_LLM_HIDDEN_DIM, DEFAULT_LLM_PATH,
-                    DEFAULT_SLIDECHAT_CHECKPOINT, IMAGE_START_TOKEN, IMAGE_END_TOKEN)
+                    IMAGE_START_TOKEN, IMAGE_END_TOKEN)
 from losses import label_smoothing_loss
 
 
@@ -77,7 +77,7 @@ class VisionLanguageModel(nn.Module):
     def __init__(
         self,
         llm_path: str = DEFAULT_LLM_PATH,
-        slidechat_checkpoint: str = DEFAULT_SLIDECHAT_CHECKPOINT,
+        slidechat_checkpoint: str = None,
         visual_dim: int = DEFAULT_VISUAL_DIM,
         llm_hidden_dim: int = DEFAULT_LLM_HIDDEN_DIM,
         num_visual_tokens: int = DEFAULT_NUM_VISUAL_TOKENS,

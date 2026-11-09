@@ -3,16 +3,17 @@ import torch
 import h5py
 import os
 import gc
-sys.path.insert(0, '/home/nadun/wd/PathKGen/pipeline') 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'pipeline'))
 from config import DEFAULT_LLM_PATH, DEFAULT_VISUAL_DIM, DEFAULT_NUM_VISUAL_TOKENS
+from paths_config import DATA_DIR, CHECKPOINTS_DIR
 
 # Avoid very slow optional-package scans in transformers caused by injected paths.
 os.environ["PYTHONPATH"] = ""
 os.environ.setdefault("PYTHONNOUSERSITE", "1")
 
 
-SLIDE_EMB = '/home/nadun/wd/PathKGen/data/slide_features/test/TCGA-2A-AAYO-01Z-00-DX1.A5BB3437-956A-4A42-AC28-1217B8016970.h5'
-CKPT_PTH = '/home/nadun/wd/PathKGen/checkpoints/q7b_best/s2/best_model.pt'
+SLIDE_EMB = os.path.join(DATA_DIR, 'slide_features', 'test', 'TCGA-2A-AAYO-01Z-00-DX1.A5BB3437-956A-4A42-AC28-1217B8016970.h5')
+CKPT_PTH = os.path.join(CHECKPOINTS_DIR, 'pathkgen_weights', 'pathkgen_stage2', 'checkpoint_epoch_1.pt')
 HISTO = 'Thymoma'
 
 
