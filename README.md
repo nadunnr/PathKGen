@@ -6,11 +6,12 @@
   <small>(* indicates equal contribution)</small>
 </p>
 
-<!-- Replace the placeholder href values with the release URLs. -->
+<!-- Replace the Project Page href with the release URL. -->
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/arXiv-Paper-B31B1B?logo=arxiv&amp;logoColor=white" alt="arXiv Paper"></a>
-  <a href="#"><img src="https://img.shields.io/badge/🤗_Hugging_Face-Models-yellow" alt="Hugging Face Models"></a>
-  <a href="#"><img src="https://img.shields.io/badge/Project-Page-blue" alt="Project Page"></a>
+  <a href="https://arxiv.org/abs/2610.33691"><img src="https://img.shields.io/badge/arXiv-Paper-B31B1B?logo=arxiv&amp;logoColor=white" alt="arXiv Paper"></a>
+  <a href="https://huggingface.co/deepshark43/pathkgen"><img src="https://img.shields.io/badge/🤗_Hugging_Face-Models-yellow" alt="Hugging Face Models"></a>
+  <a href="https://huggingface.co/datasets/deepshark43/wsi_bench_pathkgen"><img src="https://img.shields.io/badge/🤗_Hugging_Face-Dataset-yellow" alt="Hugging Face Dataset"></a>
+  <a href="https://deepshark-uom.github.io/PathKGen/"><img src="https://img.shields.io/badge/Project-Page-blue" alt="Project Page"></a>
 </p>
 
 > This paper has been accepted to WACV 2027! 🎉
@@ -20,223 +21,96 @@
 ## Overview
 We introduce PathKGen, a knowledge graph–assisted MLLM for histopathology report generation. PathKGen has two main branches: (1) a visual path that learns visual token inputs to the MLLM using pathology foundation models, and (2) a knowledge path that learns knowledge token inputs by extracting key morphological features of WSIs through querying a pathology-specific knowledge graph.
 
-## Repository Structure
-
-```
-PathKGen/
-├── pipeline/               # Main VLM training and inference pipeline
-│   ├── train_stage1.sh     # Stage 1 training script
-│   ├── train_stage2.sh     # Stage 2 training script (knowledge-guided)
-│   ├── inference.sh        # Inference script
-│   ├── model.py            # Model architecture
-│   ├── config.py           # Training configuration
-│   └── ...
-├── auxiliary_classifier/   # Auxiliary histology classifier (used at the start of the knowledge path)
-│   ├── classifier.py
-│   ├── head.py
-│   ├── inference.py
-│   └── ...
-├── knowledge_path/         # Knowledge creation, graph traversal, and visualization
-│   ├── graphs.py           # Neo4j graph query interface
-│   ├── subgraph_visualization.py
-│   └── graph_construct/    # CUI selection, knowledge prompt generation, and enrichment
-│       ├── cui_selecter.py
-│       ├── create_knowledge_prompt.py
-│       └── enrich_with_knowledge.py
-├── pre_processing/         # Data pre-processing utilities
-│   ├── convert_wsi_bench.py
-│   ├── filter_wsi_bench.py
-│   ├── encode_wsis.sh      # WSI patch & slide feature encoding (TRIDENT)
-│   └── ...
-├── paths_config.sh         # Central path configuration (edit before running)
-├── paths_config.py         # Python equivalent of the path configuration
-├── environment.yml         # Conda environment specification
-└── requirements.txt        # Pip requirements
-```
-
 ---
 
-## Replication Guide
-
-> **Data and model weights will be available soon.**
+## Usage
 
 ### 1. Environment Setup
 
-Clone the repository and create the conda environment:
-
 ```bash
-git clone <repo-url>
+git clone https://github.com/nadunnr/PathKGen.git
 cd PathKGen
 
 conda env create -f environment.yml
-conda activate vlm
+conda activate vlm        # or: pip install -r requirements.txt
 ```
 
-Alternatively, using pip:
+> Tested with CUDA 12.1.
+
+### 2. Download Data and Weights
+
+From the repository root (`data/`, `checkpoints/` and `results/` resolve relative to it; `export VLM_ROOT=/path/to/PathKGen` to use another location):
 
 ```bash
-pip install -r requirements.txt
+# Dataset -> data/dataset/, data/slide_features/{train,test}/
+hf download deepshark43/wsi_bench_pathkgen --repo-type dataset --include "data/*" --local-dir .
+
+# PathKGen weights -> checkpoints/pathkgen_weights/{pathkgen_stage1,pathkgen_stage2}/
+hf download deepshark43/pathkgen --local-dir checkpoints
+
+# Base LLM -> checkpoints/Qwen2.5-7B-Instruct/
+hf download Qwen/Qwen2.5-7B-Instruct --local-dir checkpoints/Qwen2.5-7B-Instruct
 ```
 
-> **Note:** Tested with CUDA 12.1. Ensure your system has a compatible CUDA toolkit installed before setting up the environment.
+The [dataset](https://huggingface.co/datasets/deepshark43/wsi_bench_pathkgen) holds the WSI-Bench train/test JSONs with pre-curated knowledge prompts (from a UMLS-derived knowledge graph, anchored on auxiliary classifier predictions) and pre-computed slide features (CONCH v1.5 patch features aggregated by TITAN: 1D slide features and 2D visual tokens), so no pre-processing is needed (~9,650 small files: if an anonymous download hits HTTP 429, run `hf auth login` first). The [weights](https://huggingface.co/deepshark43/pathkgen) are `stage1.pt` (~94 MB) and `checkpoint_epoch_1.pt` (~11.7 GB).
 
----
+### 3. Training
 
-### 2. Configure Paths
-
-Edit `paths_config.sh` to point to your local directories before running any scripts:
-
-```bash
-# paths_config.sh
-VLM_ROOT="/path/to/PathKGen"
-DATA_DIR="$VLM_ROOT/data"
-DATASET_DIR="$DATA_DIR/dataset"
-CHECKPOINTS_DIR="$VLM_ROOT/checkpoints"
-RESULTS_DIR="$VLM_ROOT/results"
-```
-
-Similarly, update `paths_config.py` for any Python scripts that require it.
-
----
-
-### 3. Data Download
-
-> **Data will be available soon.**
-
-Once released, download the data directory from [here](#) and place it under `PathKGen/data/` as shown:
-
-```
-data/
-├── dataset/              # Dataset JSONs with pre-curated knowledge prompts
-│   ├── WSI-Bench-train_Report_knowledge.json
-│   ├── WSI-Bench-test_Report_knowledge.json
-│   ├── WSI-Bench-train_Report_knowledge.log
-│   └── WSI-Bench-test_Report_knowledge.log
-└── slide_features/       # Pre-computed slide embeddings (TITAN slide-level features)
-    ├── train/
-    └── test/
-```
-
-> **Slide embeddings** — Patch features are extracted using CONCH v1.5 and aggregated into slide-level representations using the TITAN slide encoder. Both 1D slide features and 2D visual tokens are provided.
->
-> **Knowledge prompts** — Curated from a UMLS-derived knowledge graph using auxiliary classifier predictions as anchor nodes. These are already embedded in the `*_knowledge.json` files; no separate knowledge path construction step is required.
-
-You can proceed directly to [Training](#6-training) using the downloaded data.
-
----
-
-> **Model weights will be available soon.**
-
-Once released, download the model weights from [here](#) and place them under `PathKGen/checkpoints/` as shown:
-
-```
-checkpoints/
-├── pathkgen_weights/       # Trained weights for Stage 1 and Stage 2
-│   ├── pathkgen_stage1/
-│   └── pathkgen_stage2/
-└── Qwen2.5-7B-Instruct/    # Base Qwen2.5 LLM weights
-```
-
-Download the base Qwen2.5-7B-Instruct model from [here](#) and place it under `checkpoints/` as shown above.
-
----
-
-### 4. Data Pre-processing *(Optional — already done, data provided)*
-
-> The pre-processed dataset JSONs and pre-computed slide embeddings are available for direct download (see [Section 3](#3-data-download)). The steps below are provided for reference, or if you wish to reproduce the pre-processing from scratch.
-
-#### 4a. Convert and Filter WSI-Bench Data
-
-```bash
-cd pre_processing
-
-# Convert raw WSI-Bench JSON/JSONL to standardised format
-python convert_wsi_bench.py
-
-# Filter dataset by task and available feature files
-python filter_wsi_bench.py
-```
-
-#### 4b. Encode WSI Patch Features
-
-WSI patch and slide-level features are extracted using [TRIDENT](https://github.com/mahmoodlab/TRIDENT) with the CONCH v1.5 patch encoder and TITAN slide encoder.
-
-```bash
-# Ensure TRIDENT is installed and run_batch_of_slides.py is accessible.
-# Copy encode_wsis.sh into the TRIDENT directory and run it from there.
-bash encode_wsis.sh
-```
-
-This runs two stages:
-1. **Stage 1** — Patch encoding with CONCH v1.5 at 20× magnification
-2. **Stage 2** — Slide-level encoding with TITAN
-
-Logs are saved to `data/trident_processed/pipeline_status.log`.
-
-> **Note:** The TITAN repository must be modified to also retrieve and save the 2D visual tokens in addition to the standard 1D slide features.
-
----
-
-### 5. Knowledge Path Construction *(Optional — already done, data provided)*
-
-> Pre-curated knowledge prompts are already included in the `*_knowledge.json` dataset files available for download. The entire pipeline — including auxiliary classifier inference — has already been run and its outputs are bundled with the dataset. The steps below are provided for reference only.
-
-The knowledge path enriches each sample with contextual knowledge derived from the knowledge graph prior to training. The relevant code is located in `auxiliary_classifier/` and `knowledge_path/`.
-
----
-
-### 6. Training
-
-Training is split into two stages.
-
-#### Stage 1 — Projection Alignment
-
-Trains the projection layer that maps WSI features into the LLM token space. The LLM backbone is frozen during this stage.
+Run from `pipeline/`. Skip this step to use the released weights.
 
 ```bash
 cd pipeline
-bash train_stage1.sh
+bash train_stage1.sh    # projection alignment (LLM frozen) -> checkpoints/stage1_wsi_bench_qwen7b/<run>/
+
+bash train_stage2.sh    # knowledge-guided: projection + LoRA, BLEU-penalised loss
 ```
 
-#### Stage 2 — Knowledge-Guided Fine-tuning
+Stage 2 starts from the released Stage 1 weights by default. To start from your own, run `STAGE1_CHECKPOINT=<path>/checkpoint_epoch_8.pt bash train_stage2.sh`.
 
-Fine-tunes the full model (projection layer + LoRA adapters on the LLM) with knowledge-augmented inputs and BLEU-penalised loss.
+### 4. Inference
 
-```bash
-cd pipeline
-bash train_stage2.sh
-```
-
-> Update the `STAGE1_CHECKPOINT` variable in `train_stage2.sh` to point to your best Stage 1 checkpoint before running.
-
----
-
-### 7. Inference
-
-Run inference on the WSI-Bench test set:
+Runs the released Stage 2 weights on the WSI-Bench test set (for your own checkpoint: `STAGE2_CHECKPOINT=<path> bash inference.sh`):
 
 ```bash
 cd pipeline
 bash inference.sh
 ```
 
-Generated reports are saved to `results/inference_wsi_bench/`.
+`results/inference_wsi_bench/` gets `predictions.json` (generated reports) and `metrics.json` (BLEU-1/2/3/4, METEOR, ROUGE-L). To plot the curves of your own training runs, from `pipeline/`:
+
+```bash
+python plot_training.py --stage1_history <stage1_run>/training_history.json --stage2_history <stage2_run>/training_history.json
+```
+
+### 5. Optional: Rebuild Data from Scratch
+
+Not needed for the steps above, since the released dataset already contains these outputs. Run from the repository root, in order (inputs are under `data/`):
+
+```bash
+bash pre_processing/encode_slide_features.sh /path/to/TRIDENT   # slide features (CONCH v1.5 + TITAN)
+bash pre_processing/preprocess_wsi_bench.sh                     # convert + filter WSI-Bench
+bash pre_processing/build_knowledge_graph.sh                    # Neo4j knowledge graph + top CUIs
+bash pre_processing/build_knowledge_prompts.sh                  # auxiliary classifier + knowledge prompts
+```
+
+| Script | Needs |
+|---|---|
+| `encode_slide_features.sh` | [TRIDENT](https://github.com/mahmoodlab/TRIDENT) (its TITAN code modified to also save the 2D visual tokens); `.svs` slides in `temp_wsis/`. Move the output `.h5` files into `slide_features/{train,test}/`. |
+| `preprocess_wsi_bench.sh` | `wsi_bench/dataset_raw/WSI-Bench-{train.json,test.jsonl}`; `slide_features/{train,test}/` |
+| `build_knowledge_graph.sh` | Neo4j credentials set in `knowledge_path/graphs.py` and `knowledge_path/graph_construct/cui_selecter.py`; `UMLS_sql/neo4jdb/v8/*.csv`; `wsi_bench/kg_data/cui_jsons/` |
+| `build_knowledge_prompts.sh` | `wsi_bench/kg_data/descriptions.json`; `wsi_bench/custom_kg/relations.csv`; output of `preprocess_wsi_bench.sh` |
 
 ---
 
-### 8. Evaluation
+## Citation
 
-Compute BERTScore on the generated reports:
+If you find this work useful, please cite:
 
-```bash
-cd pipeline
-python compute_bert_score.py
+```bibtex
+@article{rajapaksha2026pathkgen,
+  title={PathKGen: Pathology Knowledge Assisted MLLM for Explainable Histopathology},
+  author={Rajapaksha, Nadun and Herath, Sandun and Wijesinghe, Devnith and Withanawasam, Isiri Amani and Watawana, Hasindri and Rodrigo, Ranga},
+  journal={arXiv preprint arXiv:2610.33691},
+  year={2026}
+}
 ```
-
-Plot training curves:
-
-```bash
-python plot_training.py
-```
-
----
